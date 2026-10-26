@@ -8,7 +8,10 @@ export type StatusTone = 'ok' | 'warn' | 'dead';
 
 /** What a bee is doing, in words, plus how worried the player should be. */
 export function beeStatus(bee: Bee): { label: string; tone: StatusTone } {
-  if (bee.death) return { label: bee.death.cause === 'starved' ? 'Starved' : 'Died of old age', tone: 'dead' };
+  if (bee.death) {
+    const label = bee.death.cause === 'starved' ? 'Starved' : bee.death.cause === 'by choice' ? 'Gave its life' : 'Died of old age';
+    return { label, tone: 'dead' };
+  }
   if (bee.runner.error) return { label: 'Stopped by an error', tone: 'warn' };
   if (bee.runner.finished) return { label: 'Finished its script', tone: 'warn' };
   const tone: StatusTone = bee.energy < HUNGRY ? 'warn' : 'ok';

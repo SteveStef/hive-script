@@ -9,6 +9,7 @@ export const COLS = 20;
 export const ROWS = 12;
 export const OPS_PER_TICK = 50; // script operations each bee (and the queen) may run per tick
 export const SENSE_RANGE = 6; // tiles a bee can see flowers from
+export const SMELL_RANGE = 12; // tiles a bee can smell scent from; scent carries farther than sight
 
 // action lengths, in ticks
 export const MOVE_TICKS = 6; // per tile
@@ -27,8 +28,21 @@ export const SCENT_LIFE = 900; // ticks a mark lasts (1 minute at 1x); it fades 
 export const SCENT_MAX = 100; // a fresh mark's strength
 export const SCENT_NAME_MAX = 20; // characters in a scent's name, like "food" or "danger"
 
-// flowers
-export const NECTAR_MAX = 3;
+// flowers: each season but winter grows its own kind, in patches placed from the seed
+export type FlowerKind = 'clover' | 'lavender' | 'goldenrod';
+export interface Bloom {
+  kind: FlowerKind;
+  patches: number;
+  size: [number, number]; // flowers per patch, smallest and largest
+  near: number; // how close to the hive a patch may be, in tiles
+  far: number; // ...and how far
+  nectar: number; // what each flower holds when full
+}
+export const BLOOMS: Record<Exclude<Season, 'winter'>, Bloom> = {
+  spring: { kind: 'clover', patches: 4, size: [3, 4], near: 2, far: 7, nectar: 3 }, // small patches close to home
+  summer: { kind: 'lavender', patches: 7, size: [3, 5], near: 2, far: 18, nectar: 3 }, // all over the meadow
+  autumn: { kind: 'goldenrod', patches: 3, size: [4, 5], near: 7, far: 18, nectar: 5 }, // few, far out, but rich
+};
 
 // the colony
 export const START_BEES = 1;
@@ -62,17 +76,6 @@ export const WINTER_AGING = 0.5; // resting in the winter cluster, bees age at h
 const LOG_LIMIT = 500;
 const FALLEN_LIMIT = 30;
 
-// Flower tiles in the starter meadow. The hive sits at (2, 6).
-const FLOWER_TILES: [number, number][] = [
-  [4, 9], [5, 9], [5, 10],
-  [5, 3], [6, 3],
-  [6, 9], [7, 10], [8, 9],
-  [7, 2], [8, 2], [8, 3], [9, 3],
-  [12, 6], [13, 6], [13, 7],
-  [13, 1], [14, 1], [14, 2],
-  [16, 9], [17, 9], [17, 10], [18, 9],
-];
-
 // ---- types ----
 
 export type Dir = 'north' | 'south' | 'east' | 'west';
@@ -92,9 +95,11 @@ export interface Tile {
 }
 
 export interface Flower extends Tile {
+  kind: FlowerKind;
   nectar: number;
+  max: number; // nectar it holds when full
   regen: number;
-  color: number;
+  color: number; // which of its kind's two shades it is drawn in
 }
 
 export type Action =
@@ -103,7 +108,7 @@ export type Action =
   | { kind: 'collect' | 'deposit' | 'eat' | 'build' | 'wait' | 'bump'; left: number }
   | { kind: 'mark'; left: number; scent: string };
 
-export type DeathCause = 'old age' | 'starved';
+export type DeathCause = 'old age' | 'starved' | 'by choice';
 
 export interface BeeStats {
   collected: number; // nectar picked up
@@ -162,6 +167,8 @@ export interface WorldOptions {
   tick?: number; // start partway through the year, e.g. late autumn
   energy?: number; // starting energy for the first bees
   comb?: number;
+  /** A fixed meadow: these tiles bloom with each season's flower instead of seeded patches. */
+  flowers?: [number, number][];
 }
 
 export interface WorldError {
@@ -182,7 +189,8 @@ export class World {
   deaths = 0;
   comb = START_COMB;
   readonly hive: Tile = { x: 2, y: 6 };
-  readonly flowers: Flower[];
+  /** What is in bloom now; replaced each season, and empty in winter. */
+  flowers: Flower[];
   readonly bees: Bee[] = [];
   readonly eggs: Egg[] = [];
   readonly queen: Queen | null = null;
@@ -199,14 +207,19 @@ export class World {
   readonly rng: () => number;
   private nextId = 1;
   private emptyFor = 0;
+  private readonly fixedFlowers: [number, number][] | null;
 
-  constructor(private readonly programs: Programs | null, seed = 1, options: WorldOptions = {}) {
+  constructor(
+    private readonly programs: Programs | null,
+    readonly seed = 1,
+    options: WorldOptions = {},
+  ) {
     this.rng = mulberry32(seed);
-    this.flowers = FLOWER_TILES.map(([x, y]) => ({ x, y, nectar: NECTAR_MAX, regen: 0, color: (x * 7 + y * 3) % 4 }));
+    this.fixedFlowers = options.flowers ?? null;
     this.tick = options.tick ?? 0;
     this.honey = options.honey ?? 0;
     this.comb = options.comb ?? START_COMB;
-    if (this.season === 'winter') for (const f of this.flowers) f.nectar = 0;
+    this.flowers = this.grow();
     if (!programs) return;
     this.queen = { runner: new Runner(programs.queen, queenGlobals(this)), action: null, laid: 0 };
     for (let i = 0; i < (options.bees ?? START_BEES); i++) this.spawn();
@@ -309,7 +322,7 @@ export class World {
       const tile = { x: key % COLS, y: Math.floor(key / COLS) };
       const strength = this.strength(at);
       const d = Math.hypot(tile.x - bee.x, tile.y - bee.y);
-      if (strength > 0 && d <= SENSE_RANGE && (strength > bestStrength || (strength === bestStrength && d < bestDist))) {
+      if (strength > 0 && d <= SMELL_RANGE && (strength > bestStrength || (strength === bestStrength && d < bestDist))) {
         best = tile;
         bestStrength = strength;
         bestDist = d;
@@ -335,7 +348,7 @@ export class World {
 
     const regen = REGEN_TICKS[this.season];
     for (const f of this.flowers) {
-      if (f.nectar < NECTAR_MAX && ++f.regen >= regen) {
+      if (f.nectar < f.max && ++f.regen >= regen) {
         f.nectar++;
         f.regen = 0;
       }
@@ -363,20 +376,25 @@ export class World {
     }
   }
 
+  /** This season's flowers: the fixed meadow if there is one, otherwise seeded patches. */
+  private grow(): Flower[] {
+    const season = this.season;
+    if (season === 'winter') return [];
+    if (!this.fixedFlowers) return bloom(this.seed, this.year, season, this.hive);
+    const b = BLOOMS[season];
+    return this.fixedFlowers.map(([x, y]) => ({ x, y, kind: b.kind, nectar: b.nectar, max: b.nectar, regen: 0, color: (x + y) % 2 }));
+  }
+
   private changeSeason(): void {
+    this.flowers = this.grow();
     const s = this.season;
     if (s === 'spring') {
-      for (const f of this.flowers) f.nectar = NECTAR_MAX;
-      this.say(null, `Spring, year ${this.year}: the meadow is in bloom again.`, 'season');
+      this.say(null, `Spring, year ${this.year}: clover is blooming in small patches near the hive.`, 'season');
     } else if (s === 'summer') {
-      this.say(null, 'Summer: flowers regrow fastest now.', 'season');
+      this.say(null, 'Summer: the clover is over, and lavender blooms all across the meadow. Flowers regrow fastest now.', 'season');
     } else if (s === 'autumn') {
-      this.say(null, 'Autumn: flowers regrow slowly. Winter is coming, so store honey.', 'season');
+      this.say(null, 'Autumn: the last flowers, goldenrod, grow in a few rich patches far from the hive. Store honey for winter.', 'season');
     } else {
-      for (const f of this.flowers) {
-        f.nectar = 0;
-        f.regen = 0;
-      }
       this.say(null, 'Winter: the flowers are gone until spring, and keeping warm burns more energy.', 'season');
     }
   }
@@ -502,11 +520,14 @@ export class World {
     this.deaths++;
     this.events.push({ type: 'death', id: bee.id, x: bee.x, y: bee.y, facing: bee.facing, cause });
     const where = `[${bee.x}, ${bee.y}]`;
+    const lost = bee.carrying ? ` carrying ${bee.carrying} nectar` : '';
     this.say(
       bee,
       cause === 'starved'
-        ? `Starved at ${where}: ran out of energy${bee.carrying ? ` carrying ${bee.carrying} nectar` : ''}.`
-        : `Died of old age at ${where}, ${(this.tick - bee.bornAt).toLocaleString('en-US')} ticks after hatching.`,
+        ? `Starved at ${where}: ran out of energy${lost}.`
+        : cause === 'by choice'
+          ? `Gave its life at ${where}${lost}, freeing its cell of comb.`
+          : `Died of old age at ${where}, ${(this.tick - bee.bornAt).toLocaleString('en-US')} ticks after hatching.`,
       'death',
     );
   }
@@ -554,6 +575,9 @@ export class World {
         return;
       case 'mark':
         bee.action = { kind: 'mark', left: MARK_TICKS, scent: args[0] as string };
+        return;
+      case 'die':
+        this.die(bee, 'by choice');
         return;
       case 'wait':
         bee.action = { kind: 'wait', left: args[0] as number };
@@ -667,6 +691,47 @@ export class World {
     }
     return true;
   }
+}
+
+/**
+ * The flowers that bloom in a season: patches of that season's kind, placed from the seed,
+ * year and season. Every meadow differs, but the same seed always grows the same one.
+ */
+export function bloom(seed: number, year: number, season: Exclude<Season, 'winter'>, hive: Tile): Flower[] {
+  const b = BLOOMS[season];
+  const rnd = mulberry32((Math.imul(seed, 0x9e3779b1) ^ Math.imul(year * 4 + SEASONS.indexOf(season), 0x85ebca6b)) >>> 0);
+  const used = new Set<number>();
+  // nothing grows on or right around the hive, nor under the skep's dome, which covers the tiles above it
+  const free = (x: number, y: number) =>
+    x >= 0 && y >= 0 && x < COLS && y < ROWS && !used.has(y * COLS + x) &&
+    !(Math.abs(x - hive.x) <= 1 && y >= hive.y - 3 && y <= hive.y + 1);
+  const centers: Tile[] = [];
+  const flowers: Flower[] = [];
+  for (let p = 0; p < b.patches; p++) {
+    let center: Tile | null = null;
+    for (let tries = 0; tries < 200 && !center; tries++) {
+      const x = Math.floor(rnd() * COLS);
+      const y = Math.floor(rnd() * ROWS);
+      const d = Math.hypot(x - hive.x, y - hive.y);
+      // patches keep at least 3 tiles apart, so they read as separate patches
+      if (d >= b.near && d <= b.far && free(x, y) && centers.every(c => Math.hypot(c.x - x, c.y - y) > 3)) center = { x, y };
+    }
+    if (!center) continue;
+    centers.push(center);
+    const size = b.size[0] + Math.floor(rnd() * (b.size[1] - b.size[0] + 1));
+    const patch = [center];
+    used.add(center.y * COLS + center.x);
+    for (let tries = 0; patch.length < size && tries < 40; tries++) {
+      const from = patch[Math.floor(rnd() * patch.length)];
+      const [dx, dy] = STEP[DIRS[Math.floor(rnd() * DIRS.length)]];
+      const t = { x: from.x + dx, y: from.y + dy };
+      if (!free(t.x, t.y)) continue;
+      patch.push(t);
+      used.add(t.y * COLS + t.x);
+    }
+    for (const t of patch) flowers.push({ ...t, kind: b.kind, nectar: b.nectar, max: b.nectar, regen: 0, color: Math.floor(rnd() * 2) });
+  }
+  return flowers;
 }
 
 const RIGHT_OF: Record<Dir, Dir> = { north: 'east', east: 'south', south: 'west', west: 'north' };

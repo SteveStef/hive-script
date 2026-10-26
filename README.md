@@ -63,15 +63,18 @@ Key ideas:
   bee or egg needs a cell of comb; workers `build()` more comb from 15 honey. Flowers can
   only feed so many bees, and winter eats into stores, so a queen who lays too eagerly
   starves her colony. (A hidden ceiling of 120 bees exists only for performance.)
-- **Seasons.** Spring, summer, autumn and winter last 2,700 ticks each. Flowers bloom in
-  spring, regrow fastest in summer and vanish in winter. In winter flying costs double,
-  resting burns more energy, and bees age at half speed.
+- **Seasons.** Spring, summer, autumn and winter last 2,700 ticks each. Each season grows
+  its own flowers in patches placed by the seed (`BLOOMS` and `bloom()` in `world.ts`):
+  clover near the hive in spring, lavender everywhere in summer, a few rich goldenrod
+  patches far out in autumn, nothing in winter. Every Run is a new meadow, so scripts have
+  to explore rather than hard-code positions. In winter flying costs double, resting burns
+  more energy, and bees age at half speed.
 - **Bees eat, age and die.** Flying burns energy (1 per tile); `eat()` at the hive turns
   honey into energy (1 honey = 40). A bee starves at 0 energy and dies of old age after
   3,600–5,400 ticks of aging.
 - **Scent is how bees share what they know.** `mark("food")` scents the bee's own tile;
-  any bee can `smell("food")` the strongest mark within sight, or read its own tile with
-  `smell_here()`. Marks fade over 900 ticks and show on the meadow, one color per name.
+  any bee can `smell("food")` the strongest mark within 12 tiles (twice its sight), or read
+  its own tile with `smell_here()`. Marks fade over 900 ticks and show on the meadow, one color per name.
 - **Everything is available from the start.** There are no unlocks; the puzzle is the colony,
   not earning functions.
 - **The simulation is deterministic.** The same script and seed always play out the

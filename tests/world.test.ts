@@ -3,7 +3,7 @@ import { DEFAULT_FORAGER, DEFAULT_QUEEN } from '../src/defaultScript';
 import { parse } from '../src/lang/parser';
 import {
   BEE_COST, BUILD_COST, HATCH_TICKS, LAY_TICKS, LIFESPAN_MAX, MARK_TICKS, MAX_ENERGY, MOVE_TICKS, SCENT_LIFE, SCENT_MAX,
-  SEASON_TICKS, SENSE_RANGE, START_BEES, START_COMB, World,
+  BLOOMS, bloom, COLS, ROWS, SEASON_TICKS, START_BEES, START_COMB, World,
 } from '../src/sim/world';
 
 const IDLE_QUEEN = 'while True:\n    wait(1000)';
@@ -157,10 +157,11 @@ describe('one bee per tile', () => {
   });
 
   it('nearest_flower() skips a flower another bee is on', () => {
-    const world = makeWorld('if get_pos() == [4, 9]:\n    wait(500)\nelse:\n    print(nearest_flower())', IDLE_QUEEN, 0, 1, 2);
+    const src = 'if get_pos() == [4, 9]:\n    wait(500)\nelse:\n    print(nearest_flower())';
+    const world = new World({ forager: parse(src), queen: parse(IDLE_QUEEN) }, 1, { bees: 2, flowers: [[4, 9], [5, 9]] });
     Object.assign(world.bees[1], { x: 4, y: 9 });
     simulate(world, 3);
-    expect(printed(world)[0]).not.toBe('[4, 9]');
+    expect(printed(world)[0]).toBe('[5, 9]');
   });
 });
 
@@ -193,15 +194,65 @@ describe('energy, food and old age', () => {
   });
 });
 
+describe('die()', () => {
+  it('ends the bee at once, frees its cell of comb, and stops its script', () => {
+    const world = makeWorld('move(East)\ndie()\nprint("still here")', IDLE_QUEEN, 0, 1, 2);
+    const space = world.space;
+    simulate(world, MOVE_TICKS + 2);
+    expect(world.bees).toEqual([]);
+    expect(world.fallen.map(b => b.death?.cause)).toEqual(['by choice', 'by choice']);
+    expect(world.space).toBe(space + 2);
+    expect(printed(world)).toEqual([]);
+    expect(world.log.some(l => l.text.startsWith('Gave its life'))).toBe(true);
+  });
+
+  it('the queen cannot die()', () => {
+    const world = simulate(makeWorld('wait(1000)', 'die()'), 5);
+    expect(world.error?.message).toContain('for worker bees');
+  });
+});
+
 describe('seasons', () => {
-  it('winter empties the flowers and spring refills them', () => {
-    const world = simulate(makeWorld('while True:\n    eat()', GREEDY_QUEEN, 5000), SEASON_TICKS * 3);
+  it('each season grows its own kind of flower in new places, and winter grows none', () => {
+    const world = makeWorld('while True:\n    eat()', GREEDY_QUEEN, 5000);
+    const layouts: string[] = [];
+    for (const season of ['spring', 'summer', 'autumn'] as const) {
+      expect(world.season).toBe(season);
+      expect(world.flowers.length).toBeGreaterThan(0);
+      expect(world.flowers.every(f => f.kind === BLOOMS[season].kind && f.nectar === f.max)).toBe(true);
+      layouts.push(JSON.stringify(world.flowers.map(f => [f.x, f.y])));
+      simulate(world, SEASON_TICKS);
+    }
+    expect(new Set(layouts).size).toBe(3);
     expect(world.season).toBe('winter');
-    expect(world.flowers.every(f => f.nectar === 0)).toBe(true);
+    expect(world.flowers).toEqual([]);
     simulate(world, SEASON_TICKS);
-    expect(world.season).toBe('spring');
     expect(world.year).toBe(2);
-    expect(world.flowers.every(f => f.nectar > 0)).toBe(true);
+    expect(world.flowers.every(f => f.kind === 'clover' && f.nectar === f.max)).toBe(true);
+    expect(JSON.stringify(world.flowers.map(f => [f.x, f.y]))).not.toBe(layouts[0]); // a new year, a new meadow
+  });
+
+  it('the same seed always grows the same meadow, and another seed a different one', () => {
+    const hive = { x: 2, y: 6 };
+    expect(bloom(7, 1, 'summer', hive)).toEqual(bloom(7, 1, 'summer', hive));
+    expect(bloom(7, 1, 'summer', hive)).not.toEqual(bloom(8, 1, 'summer', hive));
+  });
+
+  it('patches stay inside the meadow, off the hive, and never overlap', () => {
+    const hive = { x: 2, y: 6 };
+    for (let seed = 1; seed <= 50; seed++) {
+      for (const season of ['spring', 'summer', 'autumn'] as const) {
+        const flowers = bloom(seed, 1, season, hive);
+        const b = BLOOMS[season];
+        expect(flowers.length).toBeGreaterThanOrEqual(b.size[0] * 2); // at least two patches always fit
+        const keys = flowers.map(f => f.y * COLS + f.x);
+        expect(new Set(keys).size).toBe(keys.length);
+        for (const f of flowers) {
+          expect(f.x >= 0 && f.y >= 0 && f.x < COLS && f.y < ROWS).toBe(true);
+          expect(Math.abs(f.x - hive.x) <= 1 && f.y >= hive.y - 3 && f.y <= hive.y + 1).toBe(false);
+        }
+      }
+    }
   });
 
   it('bees age at half speed in winter', () => {
@@ -230,7 +281,7 @@ describe('scent', () => {
     const script = [
       'move_to([5, 6])', 'mark("food")', 'wait(100)', 'move_to([6, 6])', 'mark("food")', 'move_to([4, 6])',
       'print(smell("food"), smell_here("food"), smell("danger"))',
-      'move_to([12 + ' + SENSE_RANGE + ', 6])', 'print(smell("food"))',
+      'move_to([19, 6])', 'print(smell("food"))', // 13 tiles from the nearest mark, past SMELL_RANGE
     ].join('\n');
     const world = simulate(makeWorld(script), 900);
     expect(world.error).toBeNull();

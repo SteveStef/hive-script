@@ -1,5 +1,5 @@
 import { mulberry32 } from '../sim/rng';
-import { COLS, ROWS, type Tile } from '../sim/world';
+import { COLS, ROWS, type FlowerKind, type Tile } from '../sim/world';
 import { disc, INK, outlined, paint, sprite } from './pixels';
 
 export const TILE = 16;
@@ -79,36 +79,40 @@ export function makeSkep(): HTMLCanvasElement {
   );
 }
 
-// Tiny flowers: a 3x3 plus with a lit top petal, a shaded bottom petal and a drop shadow.
-const FLOWER_COLORS = [
-  ['#FFFFFF', '#C9CDD0', '#F2C230'],
-  ['#F7D640', '#D9A520', '#E07A1F'],
-  ['#8EC3F2', '#5A8ED0', '#F6F2E2'],
-  ['#E85050', '#9A2228', '#F2C230'],
-];
-export const TINY = FLOWER_COLORS.map(([light, shade, center]) =>
-  sprite(3, 4, g => {
-    const P = (x: number, y: number, c: string) => {
-      g.fillStyle = c;
-      g.fillRect(x, y, 1, 1);
-    };
-    P(1, 0, light);
-    P(0, 1, light);
-    P(1, 1, center);
-    P(2, 1, shade);
-    P(1, 2, shade);
-    P(2, 2, '#3F7424');
-    P(1, 3, '#3F7424');
+// Tiny flowers, drawn from small pixel maps: l = lit petal, s = shaded petal, c = accent, g = stem.
+// Each kind has its own shape and two shades, so a patch reads as one kind at a glance.
+const STEM = '#3F7424';
+const FLOWER_ART: Record<FlowerKind, { map: string[]; shades: [string, string, string][] }> = {
+  // clover: a round white or pink head
+  clover: { map: ['.l.', 'lcs', '.s.', '.g.'], shades: [['#FFFFFF', '#D5CEDB', '#F4C6DA'], ['#F6B4D2', '#D27BA6', '#FFE3EF']] },
+  // lavender: a narrow spike of purple buds
+  lavender: { map: ['.l', 'ls', '.c', 'ls', '.g'], shades: [['#BCA4F4', '#7B5CC6', '#DCCEFB'], ['#9D82E6', '#634AAE', '#C9B8F5']] },
+  // goldenrod: a nodding plume of tiny yellow heads
+  goldenrod: { map: ['l.l', '.lc', 'ls.', '.g.'], shades: [['#FFE15A', '#D9A520', '#FFF3A8'], ['#F7C531', '#C98A1A', '#FFE27A']] },
+};
+const KINDS = Object.keys(FLOWER_ART) as FlowerKind[];
+
+/** Open flowers for each kind, one per shade. */
+export const TINY = Object.fromEntries(
+  KINDS.map(kind => {
+    const { map, shades } = FLOWER_ART[kind];
+    return [kind, shades.map(([l, sh, c]) => sprite(map[0].length, map.length, g => paint(g, map, { l, s: sh, c, g: STEM }, 0, 0)))];
   }),
-);
+) as Record<FlowerKind, HTMLCanvasElement[]>;
+
 /** A closed bud in the flower's own color, shown once its nectar is taken. */
-export const BUDS = FLOWER_COLORS.map(([, shade]) =>
-  sprite(2, 2, g => {
-    g.fillStyle = shade;
-    g.fillRect(0, 0, 2, 1);
-    g.fillStyle = '#3F7424';
-    g.fillRect(0, 1, 2, 1);
-  }),
-);
+export const BUDS = Object.fromEntries(
+  KINDS.map(kind => [
+    kind,
+    FLOWER_ART[kind].shades.map(([, shade]) =>
+      sprite(2, 2, g => {
+        g.fillStyle = shade;
+        g.fillRect(0, 0, 2, 1);
+        g.fillStyle = STEM;
+        g.fillRect(0, 1, 2, 1);
+      }),
+    ),
+  ]),
+) as Record<FlowerKind, HTMLCanvasElement[]>;
 /** Where the tiny flowers sit inside a flower tile. */
 export const FLOWER_SPOTS: [number, number][] = [[3, 3], [10, 2], [7, 7], [12, 10], [3, 11], [8, 13]];

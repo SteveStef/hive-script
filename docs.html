@@ -33,6 +33,11 @@
             Positions are <code>[x, y]</code> tiles, with <code>[0, 0]</code> at the top-left. The hive is at
             <code>[2, 6]</code>. A tick is the game's unit of time; 1&times; runs 15 ticks a second.
           </p>
+          <p class="note">
+            The clips all use one fixed meadow, so their examples can name exact flower positions. In the game, flowers
+            bloom in new places every season and every game, so your scripts should find them with
+            <code>nearest_flower()</code> and <code>smell()</code> rather than fixed positions.
+          </p>
         </section>
       </main>
     </div>

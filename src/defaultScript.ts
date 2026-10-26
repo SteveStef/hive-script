@@ -1,8 +1,13 @@
 export const DEFAULT_FORAGER = `# forager.bee: every worker bee runs its own copy of this.
 # Press Run (or Ctrl+Enter). Click a bee to see its stats and which line it is on.
+
+def can_reach(p):
+    # flying costs 1 energy per tile: is there enough to get there and back home?
+    return energy() > distance(get_pos(), p) + distance(p, hive_pos()) + 10
+
 while True:
-    if energy() < 25:
-        # flying burns energy; head home and eat before you starve
+    if energy() < distance(get_pos(), hive_pos()) + 10:
+        # turn back while there's still enough energy to get home
         go_home()
         eat()
     elif season() == "winter":
@@ -16,12 +21,22 @@ while True:
             build()  # turn honey into wax: one more cell of comb
     else:
         f = nearest_flower()
-        if f:
+        s = smell("food")
+        if f and can_reach(f):
             move_to(f)
-            collect()
+            if collect():
+                mark("food")  # tell the others: flowers here
+        elif s and distance(get_pos(), s) > 6 and can_reach(s):
+            # flowers out of sight that another bee marked: follow the scent
+            move_to(s)
         else:
-            # nothing in sight: wander one tile in a random direction
-            move([North, South, East, West][random(4)])
+            # nothing to see or smell: explore somewhere new
+            spot = [random(20), random(12)]
+            if can_reach(spot):
+                move_to(spot)
+            else:
+                go_home()
+                eat()
 `;
 
 export const DEFAULT_QUEEN = `# queen.bee: the queen never leaves the hive. She decides when the colony grows.

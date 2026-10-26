@@ -1,6 +1,7 @@
 import {
   BEE_COST, BUILD_COST, BUILD_TICKS, COLLECT_TICKS, DEPOSIT_TICKS, EAT_TICKS, ENERGY_PER_HONEY, ENERGY_PER_TILE,
-  HATCH_TICKS, LAY_TICKS, MARK_TICKS, MAX_ENERGY, MAX_WAIT, MOVE_TICKS, SCENT_LIFE, SCENT_MAX, SEASON_TICKS, SENSE_RANGE, type ScriptFile,
+  HATCH_TICKS, LAY_TICKS, MARK_TICKS, MAX_ENERGY, MAX_WAIT, MOVE_TICKS, SCENT_LIFE, SCENT_MAX, SEASON_TICKS, SENSE_RANGE, SMELL_RANGE,
+  type ScriptFile,
 } from './world';
 
 export interface ApiDoc {
@@ -31,6 +32,9 @@ export const API_DOCS: ApiDoc[] = [
   { name: 'build', signature: 'build()', insert: 'build()', only: 'forager',
     doc: `At the hive, turn ${BUILD_COST} honey into wax for one more cell of comb (${BUILD_TICKS} ticks). Every bee and egg needs a cell. Returns True if it worked.` },
 
+  { name: 'die', signature: 'die()', insert: 'die()', only: 'forager',
+    doc: "End this bee's life right away. It stops eating the colony's honey and frees its cell of comb. Any nectar it carries is lost." },
+
   // worker senses
   { name: 'nearest_flower', signature: 'nearest_flower()', insert: 'nearest_flower()', only: 'forager',
     doc: `Position of the closest flower with nectar and no other bee on it, within ${SENSE_RANGE} tiles, or None if you can't see one.` },
@@ -50,7 +54,7 @@ export const API_DOCS: ApiDoc[] = [
   { name: 'mark', signature: 'mark(name)', insert: 'mark("${1:food}")', only: 'forager',
     doc: `Leave a scent called name, like "food" or "danger", on the tile you are on (${MARK_TICKS} ticks). It fades away over ${SCENT_LIFE} ticks; marking again makes it fresh.` },
   { name: 'smell', signature: 'smell(name)', insert: 'smell("${1:food}")', only: 'forager',
-    doc: `Position of the tile within ${SENSE_RANGE} tiles where that scent is strongest, or None if you can't smell it.` },
+    doc: `Position of the tile within ${SMELL_RANGE} tiles where that scent is strongest, or None if you can't smell it. Scent carries twice as far as a bee can see.` },
   { name: 'smell_here', signature: 'smell_here(name)', insert: 'smell_here("${1:food}")', only: 'forager',
     doc: `How strong that scent is on your tile: ${SCENT_MAX} when just marked, fading to 0.` },
 
@@ -65,7 +69,7 @@ export const API_DOCS: ApiDoc[] = [
   { name: 'comb', signature: 'comb()', insert: 'comb()', doc: 'Cells of comb in the hive. Every bee and egg needs one.' },
   { name: 'space', signature: 'space()', insert: 'space()', doc: 'Free cells of comb: how many more eggs there is room for.' },
   { name: 'season', signature: 'season()', insert: 'season()',
-    doc: `"spring", "summer", "autumn" or "winter". Each season lasts ${SEASON_TICKS} ticks. Nothing blooms in winter.` },
+    doc: `"spring", "summer", "autumn" or "winter". Each season lasts ${SEASON_TICKS} ticks and grows its own flowers in new places: clover, lavender, then goldenrod. Nothing blooms in winter.` },
   { name: 'season_left', signature: 'season_left()', insert: 'season_left()', doc: 'Ticks until the season changes.' },
   { name: 'year', signature: 'year()', insert: 'year()', doc: 'Which year it is, starting at 1.' },
   { name: 'wait', signature: 'wait(ticks)', insert: 'wait(${1:30})', doc: `Do nothing for a number of ticks (1 to ${MAX_WAIT}).` },
@@ -77,6 +81,8 @@ export const API_DOCS: ApiDoc[] = [
   { name: 'min', signature: 'min(a, b, ...)', insert: 'min(${1})', doc: 'The smallest number.' },
   { name: 'max', signature: 'max(a, b, ...)', insert: 'max(${1})', doc: 'The largest number.' },
   { name: 'str', signature: 'str(value)', insert: 'str(${1})', doc: 'The value as text.' },
+  { name: 'distance', signature: 'distance(a, b)', insert: 'distance(${1:get_pos()}, ${2:hive_pos()})',
+    doc: 'How many tiles a bee flies between two positions: across plus up or down. Flying costs energy per tile.' },
   { name: 'int', signature: 'int(value)', insert: 'int(${1})', doc: 'The value as a whole number.' },
   { name: 'North', signature: 'North', insert: 'North', doc: 'Up the screen.', constant: true, only: 'forager' },
   { name: 'South', signature: 'South', insert: 'South', doc: 'Down the screen.', constant: true, only: 'forager' },

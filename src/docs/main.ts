@@ -7,7 +7,7 @@ import { Renderer } from '../render/renderer';
 import { TILE } from '../render/scenery';
 import { API_DOCS } from '../sim/apiDocs';
 import { World } from '../sim/world';
-import { DOCS, SECTIONS, type Demo, type DocEntry } from './entries';
+import { demoOptions, DOCS, SECTIONS, type Demo, type DocEntry } from './entries';
 
 const DEMO_TICKS_PER_SECOND = 30; // twice 1x, so the clips don't drag
 const DEFAULT_LENGTH = 600; // ticks before a clip that never finishes starts over
@@ -56,7 +56,7 @@ class Clip {
   private shownOutput = '';
 
   constructor(private readonly demo: Demo, canvas: HTMLCanvasElement, private readonly code: HTMLElement, private readonly output: HTMLElement) {
-    this.renderer = new Renderer(this.full, new World(null));
+    this.renderer = new Renderer(this.full);
     canvas.width = demo.view[2] * TILE;
     canvas.height = demo.view[3] * TILE;
     this.g = canvas.getContext('2d')!;
@@ -65,9 +65,7 @@ class Clip {
 
   private reset(): void {
     const d = this.demo;
-    this.world = new World({ forager: parse(d.forager ?? IDLE), queen: parse(d.queen ?? IDLE) }, 1, {
-      bees: d.bees ?? 1, honey: d.honey, tick: d.tick, energy: d.energy, comb: d.comb,
-    });
+    this.world = new World({ forager: parse(d.forager ?? IDLE), queen: parse(d.queen ?? IDLE) }, 1, demoOptions(d));
     this.acc = 0;
     this.hold = 0;
   }

@@ -1,5 +1,5 @@
 import beeSheetUrl from '../assets/bumble-bee.png';
-import { COLS, MOVE_TICKS, NECTAR_MAX, ROWS, SCENT_MAX, SENSE_RANGE, type Bee, type Dir, type Season, type Tile, type World } from '../sim/world';
+import { COLS, MOVE_TICKS, ROWS, SCENT_MAX, SENSE_RANGE, type Bee, type Dir, type Flower, type Season, type Tile, type World } from '../sim/world';
 import { INK } from './pixels';
 import { BUDS, FLOWER_SPOTS, makeGround, makeSkep, TILE, TINY } from './scenery';
 
@@ -47,7 +47,8 @@ export class Renderer {
   readonly width = COLS * TILE;
   readonly height = ROWS * TILE;
   private readonly g: CanvasRenderingContext2D;
-  private readonly ground: HTMLCanvasElement;
+  private ground: HTMLCanvasElement | null = null;
+  private groundFlowers: Flower[] | null = null; // the flowers the ground was drawn for
   private readonly skep = makeSkep();
   private readonly sheet = new Image();
   private particles: Particle[] = [];
@@ -55,11 +56,10 @@ export class Renderer {
   private readonly weather = Array.from({ length: 48 }, () => ({ x: Math.random() * COLS * TILE, y: Math.random() * ROWS * TILE, phase: Math.random() * 6 }));
   private frame = 0;
 
-  constructor(canvas: HTMLCanvasElement, world: World) {
+  constructor(canvas: HTMLCanvasElement) {
     canvas.width = this.width;
     canvas.height = this.height;
     this.g = canvas.getContext('2d')!;
-    this.ground = makeGround(world.flowers, world.hive);
     this.sheet.src = beeSheetUrl;
   }
 
@@ -94,7 +94,12 @@ export class Renderer {
       if (e.type === 'lay' || e.type === 'hatch' || e.type === 'build') this.burst(world.hive.x * TILE + 8, world.hive.y * TILE + 6, '#FFFFFF');
     }
 
-    g.drawImage(this.ground, 0, 0);
+    // the leafy ground under the flowers moves with them, so it is redrawn when a new season blooms
+    if (world.flowers !== this.groundFlowers) {
+      this.ground = makeGround(world.flowers, world.hive);
+      this.groundFlowers = world.flowers;
+    }
+    g.drawImage(this.ground!, 0, 0);
     this.drawScents(world);
     if (hover) {
       g.fillStyle = 'rgba(255, 255, 255, 0.2)';
@@ -106,15 +111,14 @@ export class Renderer {
       const w = Math.sin(t * 0.045 - x * 0.05 - y * 0.02) + 0.45 * Math.sin(t * 0.013 + x * 0.03);
       return w > 1.05 ? 1 : w < -1.25 ? -1 : 0;
     };
-    // nothing blooms in winter: only the leafy ground under the snow remains
-    for (const f of world.season === 'winter' ? [] : world.flowers) {
-      const open = Math.ceil((f.nectar / NECTAR_MAX) * FLOWER_SPOTS.length);
+    for (const f of world.flowers) {
+      const open = Math.ceil((f.nectar / f.max) * FLOWER_SPOTS.length);
       FLOWER_SPOTS.forEach(([dx, dy], i) => {
         const px = f.x * TILE + dx;
         const py = f.y * TILE + dy;
-        const color = (f.color + i) % TINY.length;
-        if (i < open) g.drawImage(TINY[color], px - 1 + wind(px, py), py - 1);
-        else g.drawImage(BUDS[color], px - 1 + wind(px, py), py);
+        const shade = (f.color + i) % 2;
+        if (i < open) g.drawImage(TINY[f.kind][shade], px - 1 + wind(px, py), py - 1);
+        else g.drawImage(BUDS[f.kind][shade], px - 1 + wind(px, py), py);
       });
     }
 
@@ -206,10 +210,10 @@ export class Renderer {
         const py = y * TILE + inset;
         const size = TILE - inset * 2;
         if (i === 0) {
-          g.fillStyle = `rgba(${rgb}, ${0.1 + 0.25 * a})`;
+          g.fillStyle = `rgba(${rgb}, ${0.05 + 0.12 * a})`;
           g.fillRect(px, py, size, size);
         }
-        g.fillStyle = `rgba(${rgb}, ${0.25 + 0.65 * a})`;
+        g.fillStyle = `rgba(${rgb}, ${0.12 + 0.45 * a})`;
         g.fillRect(px, py, size, 1);
         g.fillRect(px, py + size - 1, size, 1);
         g.fillRect(px, py + 1, 1, size - 2);

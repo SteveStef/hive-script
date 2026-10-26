@@ -80,6 +80,7 @@ export function beeGlobals(world: World, bee: Bee): Record<string, Value> {
     deposit: action('deposit'),
     eat: action('eat'),
     build: action('build'),
+    die: action('die'),
     mark: builtin('mark', (args, line) => {
       expectArgs('mark', args, 1, line);
       return act('mark', [scentName('mark', args[0], line)]);
@@ -113,7 +114,7 @@ export function beeGlobals(world: World, bee: Bee): Record<string, Value> {
 }
 
 // Worker actions the queen might reach for; each gets a clear explanation instead of "not defined".
-const WORKER_ONLY = ['move', 'move_to', 'go_home', 'collect', 'deposit', 'eat', 'build', 'mark'];
+const WORKER_ONLY = ['move', 'move_to', 'go_home', 'collect', 'deposit', 'eat', 'build', 'mark', 'die'];
 
 /** Everything the queen's script (queen.bee) can see. */
 export function queenGlobals(world: World): Record<string, Value> {

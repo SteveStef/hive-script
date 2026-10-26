@@ -53,6 +53,14 @@ export function coreBuiltins(print: (text: string) => void): Record<string, Valu
       expectArgs('str', args, 1, line);
       return format(args[0]);
     }),
+    distance: builtin('distance', (args, line) => {
+      expectArgs('distance', args, 2, line);
+      const [a, b] = args.map(v => {
+        if (Array.isArray(v) && v.length === 2 && typeof v[0] === 'number' && typeof v[1] === 'number') return v as number[];
+        throw new ScriptError(`distance() needs two positions like [3, 5], not ${format(v, true)}.`, line);
+      });
+      return Math.abs(a[0] - b[0]) + Math.abs(a[1] - b[1]);
+    }),
     int: builtin('int', (args, line) => {
       expectArgs('int', args, 1, line);
       const v = args[0];

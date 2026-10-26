@@ -42,8 +42,9 @@ document.querySelectorAll<HTMLElement>('.file-tab').forEach(tab => {
   tab.addEventListener('click', () => editor.show(tab.dataset.file as ScriptFile));
 });
 
-let world = new World(null);
-const renderer = new Renderer(canvas, world);
+let seed = newSeed();
+let world = new World(null, seed);
+const renderer = new Renderer(canvas);
 let running = false;
 let speed = 1;
 let acc = 0;
@@ -74,7 +75,9 @@ function start(): void {
       return;
     }
   }
-  world = new World(programs);
+  world = new World(programs, seed);
+  world.say(null, `Meadow #${seed}: flowers bloom in new places every season, and every game is a new meadow.`, 'note');
+  seed = newSeed(); // the next Run or Restart grows a different meadow
   sourceLines = { forager: editor.getValue('forager').split('\n'), queen: editor.getValue('queen').split('\n') };
   logShown = 0;
   consoleEl.replaceChildren();
@@ -131,7 +134,7 @@ canvas.addEventListener('mousemove', e => {
   const p = canvasPoint(e);
   hover = { x: Math.floor(p.x / TILE), y: Math.floor(p.y / TILE) };
   const flower = world.flowerAt(hover.x, hover.y);
-  const what = world.atHive(hover) ? ' · the hive (click to follow the queen)' : flower ? ` · flower with ${flower.nectar} nectar` : '';
+  const what = world.atHive(hover) ? ' · the hive (click to follow the queen)' : flower ? ` · ${flower.kind} with ${flower.nectar} of ${flower.max} nectar` : '';
   const scents = world.scentsAt(hover.x, hover.y).map(([name, strength]) => `"${name}" ${strength}`).join(', ');
   hud.status.textContent = `Tile [${hover.x}, ${hover.y}]${what}${scents ? ` · scent ${scents}` : ''}`;
 });
@@ -173,6 +176,10 @@ function frame(now: number): void {
   world.events = [];
   updateHud();
   requestAnimationFrame(frame);
+}
+
+function newSeed(): number {
+  return 1 + Math.floor(Math.random() * 999_999);
 }
 
 function clock(ticks: number): string {

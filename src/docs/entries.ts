@@ -1,6 +1,6 @@
 import {
   BEE_COST, BUILD_COST, BUILD_TICKS, COLLECT_TICKS, DEPOSIT_TICKS, EAT_TICKS, ENERGY_PER_HONEY, HATCH_TICKS, LAY_TICKS,
-  MARK_TICKS, MOVE_TICKS, NECTAR_MAX, SCENT_LIFE, SCENT_MAX, SEASON_TICKS, SENSE_RANGE,
+  BLOOMS, MARK_TICKS, MOVE_TICKS, SCENT_LIFE, SCENT_MAX, SEASON_TICKS, SENSE_RANGE, SMELL_RANGE, type WorldOptions,
 } from '../sim/world';
 
 /** A small scene the docs page plays on loop: real game, real scripts. */
@@ -29,6 +29,23 @@ export interface DocEntry {
 }
 
 export const SECTIONS = ['Moving', 'Working', 'What a bee knows', 'Scent', 'The queen', 'The colony', 'Time and seasons', 'Utilities', 'Language helpers'];
+
+// Clips use one fixed meadow, so the positions in their scripts always land on flowers.
+// (In the game, flowers bloom in new places every season.) The hive sits at [2, 6].
+const DEMO_MEADOW: [number, number][] = [
+  [4, 9], [5, 9], [5, 10],
+  [5, 3], [6, 3],
+  [6, 9], [7, 10], [8, 9],
+  [7, 2], [8, 2], [8, 3], [9, 3],
+  [12, 6], [13, 6], [13, 7],
+  [13, 1], [14, 1], [14, 2],
+  [16, 9], [17, 9], [17, 10], [18, 9],
+];
+
+/** The world a clip starts from. */
+export function demoOptions(d: Demo): WorldOptions {
+  return { bees: d.bees ?? 1, honey: d.honey, tick: d.tick, energy: d.energy, comb: d.comb, flowers: DEMO_MEADOW };
+}
 
 const HIVE_VIEW: Demo['view'] = [0, 3, 7, 6];
 const MEADOW_VIEW: Demo['view'] = [0, 2, 11, 9];
@@ -69,7 +86,7 @@ export const DOCS: Record<string, DocEntry> = {
   // ---- working ----
   collect: {
     section: 'Working',
-    details: `Takes one nectar from the flower the bee is on. A flower holds up to ${NECTAR_MAX} nectar and regrows over time: quickly in summer, slowly in autumn, not at all in winter. Flowers close up when they are empty. collect() fails if the bee is not on a flower, the flower is empty, or the bee is already full (see capacity()).`,
+    details: `Takes one nectar from the flower the bee is on. Clover and lavender hold ${BLOOMS.spring.nectar} nectar and goldenrod ${BLOOMS.autumn.nectar}, and they regrow over time: quickly in summer, slowly in autumn, not at all in winter. Flowers close up when they are empty. collect() fails if the bee is not on a flower, the flower is empty, or the bee is already full (see capacity()).`,
     returns: 'True if the bee picked up nectar, otherwise False.',
     time: `${COLLECT_TICKS} ticks`,
     demo: { forager: 'move_to([5, 9])\nwhile collect():\n    print("carrying", nectar())\nprint("full or empty, so collect() said False")', view: HIVE_VIEW.map((v, i) => (i === 3 ? 8 : v)) as Demo['view'] },
@@ -96,10 +113,18 @@ export const DOCS: Record<string, DocEntry> = {
     demo: { forager: 'print("comb:", comb(), "| honey:", honey())\nok = build()\nprint("built:", ok, "| comb:", comb(), "| honey:", honey())', view: HIVE_VIEW, honey: 30 },
   },
 
+  die: {
+    section: 'Working',
+    details: 'Ends the bee\'s life on the spot, the way old or sick honeybees fly off so they don\'t burden the hive. A dead bee eats no more honey and frees its cell of comb for a new egg, so it can be the right call for an old bee in winter, when every honey counts: "if season() == "winter" and life_left() < 600: die()". Whatever nectar it carries is lost, and its script stops: nothing after die() runs.',
+    returns: 'Nothing: the bee is gone.',
+    time: instant,
+    demo: { forager: 'move(East)\nprint("free cells:", space())\nprint("my work here is done")\ndie()\nprint("this line never runs")', view: HIVE_VIEW, length: 200 },
+  },
+
   // ---- what a bee knows ----
   nearest_flower: {
     section: 'What a bee knows',
-    details: `Looks for flowers that still have nectar within ${SENSE_RANGE} tiles (the dotted circle in the clip), skipping any flower another bee is already on, so bees spread out instead of queuing. If none are in sight it returns None, which counts as False in an if, so "if f:" checks whether anything was found. The flower the bee is standing on counts too.`,
+    details: `Looks for flowers that still have nectar within ${SENSE_RANGE} tiles (the dotted circle in the clip), skipping any flower another bee is already on, so bees spread out instead of queuing. If none are in sight it returns None, which counts as False in an if, so "if f:" checks whether anything was found. The flower the bee is standing on counts too. Since flowers bloom in new places every season, this (with smell()) is how a script finds food.`,
     returns: 'A position like [4, 9], or None.',
     time: instant,
     demo: { forager: 'f = nearest_flower()\nprint("nearest flower:", f)\nmove_to(f)\ncollect()\nprint("now the nearest is:", nearest_flower())', view: MEADOW_VIEW, sight: true },
@@ -167,10 +192,10 @@ export const DOCS: Record<string, DocEntry> = {
   },
   smell: {
     section: 'Scent',
-    details: `Looks for a scent within ${SENSE_RANGE} tiles (the dotted circle in the clip), the same distance a bee can see flowers from. If several tiles carry it, the strongest one wins, which is usually the freshest; between equally strong tiles, the closer one wins. Like nearest_flower(), it returns None when there is nothing to find, so "if smell("danger"):" works as a check.`,
+    details: `Looks for a scent within ${SMELL_RANGE} tiles: twice as far as a bee can see (${SENSE_RANGE} tiles), so a mark can lead bees to flowers they can't see yet. If several tiles carry it, the strongest one wins, which is usually the freshest; between equally strong tiles, the closer one wins. Like nearest_flower(), it returns None when there is nothing to find, so "if smell("danger"):" works as a check.`,
     returns: 'A position like [4, 9], or None.',
     time: instant,
-    demo: { forager: 'f = nearest_flower()\nmove_to(f)\nmark("food")\ngo_home()\nprint("I smell food at", smell("food"))\nmove_to(smell("food"))\ncollect()', view: MEADOW_VIEW, sight: true },
+    demo: { forager: 'move_to([13, 6])\nmark("food")\ngo_home()\nprint("in sight?", nearest_flower() == [13, 6])\nprint("I smell food at", smell("food"))\nmove_to(smell("food"))\ncollect()', view: [0, 2, 15, 9] },
   },
   smell_here: {
     section: 'Scent',
@@ -226,7 +251,7 @@ export const DOCS: Record<string, DocEntry> = {
   // ---- time and seasons ----
   season: {
     section: 'Time and seasons',
-    details: `The year has four seasons of ${SEASON_TICKS} ticks each. Flowers bloom in spring, regrow fastest in summer, slowly in autumn, and vanish in winter, when flying costs double and keeping warm burns energy. This clip starts just before winter.`,
+    details: `The year has four seasons of ${SEASON_TICKS} ticks each, and each grows its own flowers in new places: small patches of clover near the hive in spring, lavender all over the meadow in summer, and a few rich patches of goldenrod far from the hive in autumn. Flowers regrow fastest in summer and slowest in autumn. In winter nothing blooms, flying costs double and keeping warm burns energy. Because the flowers move, a list of flower positions is only good for one season. This clip starts just before winter.`,
     returns: 'season(): "spring", "summer", "autumn" or "winter". season_left(): ticks until it changes.',
     time: instant,
     covers: ['season_left'],
@@ -261,6 +286,14 @@ export const DOCS: Record<string, DocEntry> = {
     returns: 'None.',
     time: instant,
     demo: { forager: 'print("hello from bee", 1)\nprint("I am at", get_pos(), "carrying", nectar())', view: HIVE_VIEW, length: 120 },
+  },
+
+  distance: {
+    section: 'Utilities',
+    details: 'Counts the tiles a bee flies between two positions: how far across plus how far up or down, since bees fly along the grid. Each tile costs energy, so it helps decide whether a far flower is worth the trip, or whether a scent is too far off.',
+    returns: 'A whole number of tiles.',
+    time: instant,
+    example: 'home = [2, 6]\nflower = [9, 3]\nprint("tiles to fly:", distance(home, flower))\nprint("there and back:", 2 * distance(home, flower))',
   },
 
   // ---- language helpers: shown with their output instead of a clip ----

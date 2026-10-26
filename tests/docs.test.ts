@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { DOCS } from '../src/docs/entries';
+import { demoOptions, DOCS } from '../src/docs/entries';
 import { coreBuiltins } from '../src/lang/builtins';
 import { Runner } from '../src/lang/interpreter';
 import { parse } from '../src/lang/parser';
@@ -24,9 +24,7 @@ describe('docs page', () => {
     if (entry.demo) {
       it(`the ${name} clip runs without errors`, () => {
         const d = entry.demo!;
-        const world = new World({ forager: parse(d.forager ?? IDLE), queen: parse(d.queen ?? IDLE) }, 1, {
-          bees: d.bees ?? 1, honey: d.honey, tick: d.tick, energy: d.energy, comb: d.comb,
-        });
+        const world = new World({ forager: parse(d.forager ?? IDLE), queen: parse(d.queen ?? IDLE) }, 1, demoOptions(d));
         for (let i = 0; i < (d.length ?? 600); i++) world.step();
         expect(world.error).toBeNull();
         expect(world.over).toBeNull();
