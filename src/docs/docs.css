@@ -1,0 +1,156 @@
+/* Docs: a sticky table of contents on the left, one card per function on the right.
+   Same dark editor ground and honey accents as the game; clips sit in the game's wood frame. */
+:root {
+  --bg: #14130e;
+  --panel: #1c1810;
+  --panel-2: #262015;
+  --line: #3a3324;
+  --fg: #eeeadb;
+  --muted: #a8a28c;
+  --honey: #f2b632;
+  --honey-ink: #24150c;
+  --code-bg: #120f09;
+  --font-display: 'Pixelify Sans', ui-monospace, monospace;
+  --font-body: 'Atkinson Hyperlegible', system-ui, sans-serif;
+  --font-mono: 'JetBrains Mono', ui-monospace, Menlo, monospace;
+  color-scheme: dark;
+}
+
+* { box-sizing: border-box; }
+
+body { margin: 0; background: var(--bg); color: var(--fg); font-family: var(--font-body); font-size: 16px; line-height: 1.55; }
+
+a { color: var(--honey); }
+code { font-family: var(--font-mono); font-size: 0.88em; }
+p { margin: 0; }
+
+.top {
+  position: sticky;
+  top: 0;
+  z-index: 5;
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 10px max(18px, env(safe-area-inset-right, 0px)) 10px max(18px, env(safe-area-inset-left, 0px));
+  background: var(--bg);
+  border-bottom: 1px solid var(--line);
+}
+.brand { font-family: var(--font-display); font-size: 24px; color: var(--honey); text-decoration: none; }
+.crumb { color: var(--muted); font-family: var(--font-mono); font-size: 13px; }
+.top .pbtn { margin-left: auto; }
+
+.pbtn {
+  font-family: var(--font-display);
+  font-size: 15px;
+  color: var(--honey-ink);
+  background: #f5c127;
+  padding: 5px 12px;
+  text-decoration: none;
+  box-shadow: inset -2px -2px 0 #c98a1a, inset 2px 2px 0 #ffe27a, 0 0 0 2px var(--honey-ink);
+}
+.pbtn:hover { background: #ffd24a; }
+
+.page {
+  display: grid;
+  grid-template-columns: 220px minmax(0, 1fr);
+  gap: 32px;
+  max-width: 1180px;
+  margin: 0 auto;
+  padding: 24px max(18px, env(safe-area-inset-right, 0px)) 80px max(18px, env(safe-area-inset-left, 0px));
+}
+
+.toc {
+  position: sticky;
+  top: 72px;
+  align-self: start;
+  max-height: calc(100vh - 90px);
+  overflow-y: auto;
+  display: grid;
+  gap: 14px;
+  font-family: var(--font-mono);
+  font-size: 13px;
+}
+.toc-group { display: grid; gap: 3px; }
+.toc a { color: var(--muted); text-decoration: none; }
+.toc a:hover { color: var(--fg); }
+.toc .toc-section { color: var(--honey); font-size: 11px; letter-spacing: 0.1em; text-transform: uppercase; margin-bottom: 2px; }
+
+#content { display: grid; gap: 48px; min-width: 0; }
+
+.intro { display: grid; gap: 12px; max-width: 70ch; }
+.intro h1 { margin: 0; font-family: var(--font-display); font-size: clamp(30px, 4vw, 42px); line-height: 1.1; color: var(--honey); }
+.note { color: var(--muted); font-size: 15px; }
+
+.section { display: grid; gap: 20px; scroll-margin-top: 70px; }
+.section h2 { margin: 0; font-family: var(--font-display); font-size: 26px; border-bottom: 1px solid var(--line); padding-bottom: 6px; }
+
+.fn {
+  display: grid;
+  gap: 10px;
+  padding: 18px 20px;
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  scroll-margin-top: 70px;
+}
+.fn > p { max-width: 75ch; }
+.fn-head { display: flex; flex-wrap: wrap; align-items: baseline; justify-content: space-between; gap: 8px 16px; }
+.fn-head h3 { margin: 0; font-size: 19px; font-weight: 600; color: #9bd37e; }
+.fn-head .sep { color: var(--muted); margin: 0 10px; }
+.tags { display: flex; gap: 6px; flex-wrap: wrap; }
+.tag { font-family: var(--font-mono); font-size: 11.5px; padding: 2px 8px; border-radius: 3px; background: var(--panel-2); color: var(--muted); border: 1px solid var(--line); }
+.tag.time { color: var(--honey); }
+.lead { font-weight: 700; }
+.also { margin: 0; padding-left: 18px; display: grid; gap: 2px; }
+.also code { color: #9bd37e; }
+.returns b { font-family: var(--font-mono); font-size: 11px; letter-spacing: 0.1em; text-transform: uppercase; color: var(--muted); margin-right: 8px; }
+
+.demo { display: grid; grid-template-columns: minmax(0, 1.15fr) minmax(0, 1fr); gap: 14px; align-items: start; margin-top: 4px; }
+.clip {
+  margin: 0;
+  display: grid;
+  gap: 0;
+  background: #7a4a22;
+  padding: 8px;
+  box-shadow: inset 0 0 0 2px var(--honey-ink), inset 3px 3px 0 #a8703a, inset -3px -3px 0 #4e2e14;
+  cursor: pointer;
+  position: relative;
+}
+.clip canvas { display: block; width: 100%; height: auto; image-rendering: pixelated; box-shadow: 0 0 0 2px var(--honey-ink); background: #6eab36; }
+.clip .out {
+  margin: 8px 0 0;
+  min-height: 4.8em;
+  padding: 6px 10px;
+  background: var(--code-bg);
+  color: #e8e1cc;
+  font-family: var(--font-mono);
+  font-size: 12.5px;
+  line-height: 1.6;
+  white-space: pre-wrap;
+  box-shadow: 0 0 0 2px var(--honey-ink);
+}
+.clip-hint { position: absolute; top: 14px; right: 14px; font-family: var(--font-mono); font-size: 10.5px; color: #fff; background: rgba(20, 12, 6, 0.6); padding: 1px 6px; opacity: 0; transition: opacity 0.15s; }
+.clip:hover .clip-hint, .clip:focus-within .clip-hint { opacity: 1; }
+
+.script { background: var(--code-bg); border: 1px solid var(--line); border-radius: 4px; overflow: hidden; min-width: 0; }
+.script-head { padding: 6px 12px; font-family: var(--font-mono); font-size: 11px; letter-spacing: 0.08em; text-transform: uppercase; color: var(--muted); border-bottom: 1px solid var(--line); }
+.code { margin: 0; padding: 8px 0; font-family: var(--font-mono); font-size: 13px; line-height: 1.65; overflow-x: auto; color: #e8e1cc; }
+.code .ln { display: block; padding-right: 12px; border-left: 3px solid transparent; white-space: pre; }
+.code .no { display: inline-block; width: 2.4em; padding-right: 1em; text-align: right; color: #5e5848; user-select: none; }
+.code .ln.on { background: rgba(242, 182, 50, 0.16); border-left-color: var(--honey); }
+.code .ln.on .no { color: var(--honey); }
+.code.printed { padding: 8px 12px; white-space: pre-wrap; }
+.t-kw { color: #f2b632; }
+.t-api { color: #9bd37e; }
+.t-str, .t-num { color: #e8a57a; }
+.t-com { color: #8a836c; font-style: italic; }
+
+@media (max-width: 900px) {
+  .page { grid-template-columns: minmax(0, 1fr); }
+  .toc { position: static; max-height: none; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); }
+  .demo { grid-template-columns: minmax(0, 1fr); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .clip-hint { opacity: 1; }
+}

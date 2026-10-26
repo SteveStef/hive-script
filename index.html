@@ -1,0 +1,65 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Hive Script</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;600&family=Pixelify+Sans:wght@500;700&display=swap" />
+  </head>
+  <body>
+    <header class="top">
+      <h1>Hive Script</h1>
+      <div class="controls">
+        <button class="pbtn" id="run" type="button" title="Run the script on every bee (Ctrl+Enter)">Run</button>
+        <button class="pbtn" id="pause" type="button" disabled>Pause</button>
+        <button class="pbtn" id="step" type="button" title="Advance one tick">Step</button>
+        <span class="sep"></span>
+        <button class="pbtn" type="button" data-speed="1" aria-pressed="true">1&times;</button>
+        <button class="pbtn" type="button" data-speed="4" aria-pressed="false">4&times;</button>
+        <button class="pbtn" type="button" data-speed="16" aria-pressed="false">16&times;</button>
+        <span class="sep"></span>
+        <button class="pbtn" id="music" type="button" aria-pressed="true" title="Calm background music, a track for each season">Music</button>
+        <a class="pbtn" href="./docs.html" target="_blank" rel="noopener" title="Every function, with animated examples">Docs</a>
+      </div>
+    </header>
+    <main class="layout">
+      <section class="code">
+        <div class="tabs" role="tablist">
+          <button type="button" class="file-tab" role="tab" data-file="forager" aria-selected="true">forager.bee</button>
+          <button type="button" class="file-tab" role="tab" data-file="queen" aria-selected="false">queen.bee</button>
+          <span class="tab-note" id="tab-note">every worker bee runs this</span>
+        </div>
+        <div id="editor"></div>
+        <div class="console-head">Log</div>
+        <div id="console" class="console" aria-live="polite"></div>
+      </section>
+      <section class="play">
+        <div class="screen"><canvas id="game"></canvas></div>
+        <div class="hud">
+          <div class="colony">
+            <div class="season">
+              <b id="season-name">Spring</b>
+              <span class="bar season-bar"><i id="season-bar"></i></span>
+              <span id="season-left"></span>
+            </div>
+            <div class="stats">
+              <div class="stat"><b id="s-honey">0</b><span>Honey</span></div>
+              <div class="stat"><b id="s-bees">0</b><span>Bees</span></div>
+              <div class="stat"><b id="s-eggs">0</b><span>Eggs</span></div>
+              <div class="stat"><b id="s-comb">0</b><span>Comb free</span></div>
+              <div class="stat"><b id="s-deaths">0</b><span>Died</span></div>
+              <div class="stat"><b id="s-tick">0</b><span>Tick</span></div>
+            </div>
+            <div class="chips-head">Follow a bee</div>
+            <div class="chips" id="bee-chips"></div>
+            <div class="status" id="status">Hover the meadow to see tile positions.</div>
+          </div>
+          <div class="card" id="bee-card"><p class="muted">Press Run to start the colony, then click a bee to see its stats.</p></div>
+        </div>
+      </section>
+    </main>
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>
