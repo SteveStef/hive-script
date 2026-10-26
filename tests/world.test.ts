@@ -1,16 +1,19 @@
 import { describe, expect, it } from 'vitest';
-import { DEFAULT_FORAGER, DEFAULT_QUEEN } from '../src/defaultScript';
+import { DEFAULT_FORAGER, DEFAULT_QUEEN, DEFAULT_SHARED } from '../src/defaultScript';
 import { parse } from '../src/lang/parser';
 import {
   BEE_COST, BUILD_COST, HATCH_TICKS, LAY_TICKS, LIFESPAN_MAX, MARK_TICKS, MAX_ENERGY, MOVE_TICKS, SCENT_LIFE, SCENT_MAX,
-  BLOOMS, bloom, COLS, ROWS, SEASON_TICKS, START_BEES, START_COMB, World,
+  BLOOMS, bloom, COLS, ROWS, SEASON_TICKS, SHARED_LINE_BASE, START_BEES, START_COMB, World,
 } from '../src/sim/world';
 
 const IDLE_QUEEN = 'while True:\n    wait(1000)';
 const GREEDY_QUEEN = 'while True:\n    if not lay():\n        wait(30)';
 
+// every world gets the default shared.bee, which the default forager relies on
+const SHARED = parse(DEFAULT_SHARED, SHARED_LINE_BASE + 1);
+
 function makeWorld(forager: string, queen = IDLE_QUEEN, honey = 0, seed = 1, bees?: number): World {
-  const world = new World({ forager: parse(forager), queen: parse(queen) }, seed, { bees });
+  const world = new World({ forager: parse(forager), queen: parse(queen), shared: SHARED }, seed, { bees });
   world.honey = honey;
   return world;
 }
@@ -191,6 +194,59 @@ describe('energy, food and old age', () => {
     const first = world.fallen.find(b => b.id === 1);
     expect(first?.death?.cause).toBe('old age');
     expect(first!.age).toBe(first!.lifespan);
+  });
+});
+
+describe('roles', () => {
+  const SAY_AND_WAIT = (text: string) => `print("${text}")\nwhile True:\n    wait(100)`;
+  function roleWorld(queen: string, roles: Record<string, string>, forager = SAY_AND_WAIT('forager here'), shared = '') {
+    const programs = {
+      forager: parse(forager),
+      queen: parse(queen),
+      roles: Object.fromEntries(Object.entries(roles).map(([name, src]) => [name, parse(src)])),
+      shared: parse(shared, SHARED_LINE_BASE + 1),
+    };
+    const world = new World(programs, 1);
+    world.honey = 50;
+    return world;
+  }
+
+  it('lay("builder") hatches a builder running its own script, and lay() a forager', () => {
+    const world = simulate(roleWorld('lay("builder")\nlay()\nwait(1000)', { builder: SAY_AND_WAIT('builder here') }), HATCH_TICKS + 100);
+    expect(world.bees.map(b => b.role)).toEqual(['forager', 'builder', 'forager']);
+    expect(printed(world).sort()).toEqual(['builder here', 'forager here', 'forager here']);
+  });
+
+  it('laying a role that does not exist stops the game and lists the real ones', () => {
+    const world = simulate(roleWorld('lay("buidler")', { builder: SAY_AND_WAIT('builder') }), 5);
+    expect(world.error).toMatchObject({ file: 'queen', line: 1, message: 'There\'s no role called "buidler". Your roles: forager, builder.' });
+  });
+
+  it('roles() lists every role and role_count() counts living bees of one', () => {
+    const queen = 'lay("builder")\nwait(400)\nprint(roles(), role_count("builder"), role_count("forager"))';
+    const world = simulate(roleWorld(queen, { builder: SAY_AND_WAIT('b') }), 500);
+    expect(printed(world)).toContain('["forager", "builder"] 1 1');
+  });
+
+  it('the queen has no role()', () => {
+    const world = simulate(roleWorld('print(role())', {}), 5);
+    expect(world.error?.message).toContain('for worker bees');
+  });
+
+  it('every role can call functions from shared.bee', () => {
+    const shared = 'def greet():\n    print("hi from", role())';
+    const world = simulate(roleWorld('lay("builder")\nwait(1000)', { builder: 'greet()' }, 'greet()', shared), HATCH_TICKS + 50);
+    expect(printed(world).sort()).toEqual(['hi from builder', 'hi from forager']);
+  });
+
+  it('errors point at the file and line they happened in', () => {
+    const shared = 'def boom():\n    return 1 / 0';
+    const fromShared = simulate(roleWorld('wait(1000)', {}, 'boom()', shared), 3);
+    expect(fromShared.error).toMatchObject({ file: 'shared', line: 2, beeId: 1 });
+    expect(fromShared.log.some(l => l.text.startsWith('shared.bee line 2:'))).toBe(true);
+
+    const fromRole = simulate(roleWorld('lay("builder")\nwait(1000)', { builder: 'wait(1)\nprint(nope)' }), HATCH_TICKS + 50);
+    expect(fromRole.error).toMatchObject({ file: 'builder', line: 2 });
   });
 });
 

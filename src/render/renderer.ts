@@ -1,6 +1,6 @@
 import beeSheetUrl from '../assets/bumble-bee.png';
 import { COLS, MOVE_TICKS, ROWS, SCENT_MAX, SENSE_RANGE, type Bee, type Dir, type Flower, type Season, type Tile, type World } from '../sim/world';
-import { INK } from './pixels';
+import { INK, recolor } from './pixels';
 import { BUDS, FLOWER_SPOTS, makeGround, makeSkep, TILE, TINY } from './scenery';
 
 // Elthen's "Bumble Bee Sprites" sheet: 4 rows (east, west, north, south) of 4 frames, 32x32 each.
@@ -12,6 +12,19 @@ const SCENT_COLORS = ['180, 140, 255', '255, 107, 139', '95, 211, 224', '255, 21
 
 const HUNGRY = 25; // energy below which a bee shows a warning
 
+// A color for each custom role, in the order they were made; foragers keep the plain sprite.
+// Hues sit well apart, and none is green (lost on the grass) or yellow-orange (a forager's own colors).
+const ROLE_COLORS = ['#4FC3F7', '#FF5A6E', '#9B7BFF', '#2EC4B6', '#E6E6F0'];
+// The sprite's shaded body yellows. A role's bees get these in the role's color, so their
+// underside and stripe edges show the role while the top half stays bumblebee yellow.
+const SHADED_BODY = ['#c6851e', '#ce6717'];
+
+/** The marker color for a role, or null for foragers. */
+export function roleColor(roleNames: string[], role: string): string | null {
+  const i = roleNames.indexOf(role);
+  return i > 0 ? ROLE_COLORS[(i - 1) % ROLE_COLORS.length] : null;
+}
+
 // A wash of color over the meadow for each season.
 const SEASON_TINT: Record<Season, string | null> = {
   spring: null,
@@ -21,6 +34,7 @@ const SEASON_TINT: Record<Season, string | null> = {
 };
 
 interface Ghost {
+  role: string;
   x: number;
   y: number;
   facing: Dir;
@@ -55,6 +69,8 @@ export class Renderer {
   private ghosts: Ghost[] = [];
   private readonly weather = Array.from({ length: 48 }, () => ({ x: Math.random() * COLS * TILE, y: Math.random() * ROWS * TILE, phase: Math.random() * 6 }));
   private frame = 0;
+  private roleNames: string[] = ['forager'];
+  private readonly roleSheets = new Map<string, HTMLCanvasElement>(); // the sprite sheet recolored, by role color
 
   constructor(canvas: HTMLCanvasElement) {
     canvas.width = this.width;
@@ -88,9 +104,10 @@ export class Renderer {
     const g = this.g;
     const t = world.tick + frac;
     this.frame++;
+    this.roleNames = world.roleNames;
     for (const e of world.events) {
       if (e.type === 'collect') this.burst(e.x * TILE + 8, e.y * TILE + 4);
-      if (e.type === 'death') this.ghosts.push({ x: e.x * TILE + 8, y: e.y * TILE + 2, facing: e.facing, life: 90 });
+      if (e.type === 'death') this.ghosts.push({ role: world.findBee(e.id)?.role ?? 'forager', x: e.x * TILE + 8, y: e.y * TILE + 2, facing: e.facing, life: 90 });
       if (e.type === 'lay' || e.type === 'hatch' || e.type === 'build') this.burst(world.hive.x * TILE + 8, world.hive.y * TILE + 6, '#FFFFFF');
     }
 
@@ -155,7 +172,7 @@ export class Renderer {
     for (const gh of this.ghosts) {
       gh.y -= 0.2;
       g.globalAlpha = (gh.life / 90) * 0.7;
-      if (sheetReady) g.drawImage(this.sheet, 0, SHEET_ROW[gh.facing] * FRAME, FRAME, FRAME, Math.round(gh.x) - 16, Math.round(gh.y) - 14, FRAME, FRAME);
+      if (sheetReady) g.drawImage(this.sheetFor(gh.role), 0, SHEET_ROW[gh.facing] * FRAME, FRAME, FRAME, Math.round(gh.x) - 16, Math.round(gh.y) - 14, FRAME, FRAME);
       g.globalAlpha = 1;
     }
 
@@ -284,7 +301,7 @@ export class Renderer {
     const y = Math.round(p.y - p.z);
     if (sheetReady) {
       const fr = Math.floor((this.frame + p.bee.id * 5) / 6) % 4;
-      g.drawImage(this.sheet, fr * FRAME, SHEET_ROW[p.bee.facing] * FRAME, FRAME, FRAME, x - 16, y - 14, FRAME, FRAME);
+      g.drawImage(this.sheetFor(p.bee.role), fr * FRAME, SHEET_ROW[p.bee.facing] * FRAME, FRAME, FRAME, x - 16, y - 14, FRAME, FRAME);
     } else {
       g.fillStyle = '#F5C127';
       g.fillRect(x - 4, y - 4, 8, 8);
@@ -304,6 +321,18 @@ export class Renderer {
       g.fillRect(x, y - 13, 1, 3);
       g.fillRect(x, y - 9, 1, 1);
     }
+  }
+
+  /** The sprite sheet for a role's bees: the plain one for foragers, otherwise recolored once and kept. */
+  private sheetFor(role: string): CanvasImageSource {
+    const color = roleColor(this.roleNames, role);
+    if (!color) return this.sheet;
+    let sheet = this.roleSheets.get(color);
+    if (!sheet) {
+      sheet = recolor(this.sheet, Object.fromEntries(SHADED_BODY.map(c => [c, tint(c, color)])));
+      this.roleSheets.set(color, sheet);
+    }
+    return sheet;
   }
 
   private drawSeason(season: Season): void {
@@ -349,4 +378,35 @@ function scentHash(name: string): number {
   let h = 0;
   for (const c of name) h = (h * 31 + c.charCodeAt(0)) >>> 0;
   return h;
+}
+
+/**
+ * A sprite color moved to a role's hue. It keeps its own lightness, so the sprite's shading
+ * survives; a near-grey role color (silver) gives a near-grey result instead of a vivid one.
+ */
+function tint(source: string, role: string): string {
+  const [, s, l] = toHsl(source);
+  const [h, rs] = toHsl(role);
+  return fromHsl(h, rs < 0.25 ? rs : Math.max(s, rs * 0.85), l);
+}
+
+function toHsl(hex: string): [number, number, number] {
+  const [r, g, b] = [1, 3, 5].map(i => parseInt(hex.slice(i, i + 2), 16) / 255);
+  const max = Math.max(r, g, b);
+  const min = Math.min(r, g, b);
+  const l = (max + min) / 2;
+  if (max === min) return [0, 0, l];
+  const d = max - min;
+  const s = l > 0.5 ? d / (2 - max - min) : d / (max + min);
+  const h = max === r ? (g - b) / d + (g < b ? 6 : 0) : max === g ? (b - r) / d + 2 : (r - g) / d + 4;
+  return [h / 6, s, l];
+}
+
+function fromHsl(h: number, s: number, l: number): string {
+  const f = (n: number) => {
+    const k = (n + h * 12) % 12;
+    const a = s * Math.min(l, 1 - l);
+    return Math.round(255 * (l - a * Math.max(-1, Math.min(k - 3, 9 - k, 1))));
+  };
+  return '#' + [f(0), f(8), f(4)].map(v => v.toString(16).padStart(2, '0')).join('');
 }

@@ -2,9 +2,12 @@ import type { AssignOp, BinOp, Expr, Stmt } from './ast';
 import { ScriptError } from './errors';
 import { lex, type Token, type TokenKind } from './lexer';
 
-/** Parses a whole script. Throws a ScriptError (with a line number) on the first problem. */
-export function parse(source: string): Stmt[] {
-  return new Parser(lex(source)).program();
+/**
+ * Parses a whole script. Throws a ScriptError (with a line number) on the first problem.
+ * Lines are numbered from firstLine (see lex()).
+ */
+export function parse(source: string, firstLine = 1): Stmt[] {
+  return new Parser(lex(source, firstLine)).program();
 }
 
 const ASSIGN_OPS = new Set(['=', '+=', '-=', '*=', '/=']);

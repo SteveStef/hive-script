@@ -1,10 +1,6 @@
-export const DEFAULT_FORAGER = `# forager.bee: every worker bee runs its own copy of this.
+export const DEFAULT_FORAGER = `# forager.bee: every forager runs its own copy of this.
 # Press Run (or Ctrl+Enter). Click a bee to see its stats and which line it is on.
-
-def can_reach(p):
-    # flying costs 1 energy per tile: is there enough to get there and back home?
-    return energy() > distance(get_pos(), p) + distance(p, hive_pos()) + 10
-
+# can_reach() comes from shared.bee, which every role can use.
 while True:
     if energy() < distance(get_pos(), hive_pos()) + 10:
         # turn back while there's still enough energy to get home
@@ -54,3 +50,25 @@ while True:
     else:
         wait(60)
 `;
+
+export const DEFAULT_SHARED = `# shared.bee: functions here work in every worker role's script (not the queen's).
+# Each bee still has its own copy of any variables.
+
+def can_reach(p):
+    # flying costs 1 energy per tile: is there enough to get there and back home?
+    return energy() > distance(get_pos(), p) + distance(p, hive_pos()) + 10
+`;
+
+/** What a new role's script starts as. */
+export function roleTemplate(name: string): string {
+  return `# ${name}.bee: every bee the queen lays with lay("${name}") runs its own copy of this.
+# Functions from shared.bee work here too.
+while True:
+    if energy() < 30:
+        go_home()
+        eat()
+    else:
+        print("I'm a ${name} with nothing to do yet")
+        wait(60)
+`;
+}

@@ -1,12 +1,11 @@
 import { describe, expect, it } from 'vitest';
-import { demoOptions, DOCS } from '../src/docs/entries';
+import { demoOptions, demoPrograms, DOCS } from '../src/docs/entries';
 import { coreBuiltins } from '../src/lang/builtins';
 import { Runner } from '../src/lang/interpreter';
 import { parse } from '../src/lang/parser';
 import { API_DOCS } from '../src/sim/apiDocs';
 import { World } from '../src/sim/world';
 
-const IDLE = 'while True:\n    wait(1000)';
 const covered = new Set(Object.entries(DOCS).flatMap(([name, entry]) => [name, ...(entry.covers ?? [])]));
 
 describe('docs page', () => {
@@ -24,7 +23,7 @@ describe('docs page', () => {
     if (entry.demo) {
       it(`the ${name} clip runs without errors`, () => {
         const d = entry.demo!;
-        const world = new World({ forager: parse(d.forager ?? IDLE), queen: parse(d.queen ?? IDLE) }, 1, demoOptions(d));
+        const world = new World(demoPrograms(d), 1, demoOptions(d));
         for (let i = 0; i < (d.length ?? 600); i++) world.step();
         expect(world.error).toBeNull();
         expect(world.over).toBeNull();

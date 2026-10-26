@@ -13,10 +13,16 @@ npm run build      # typecheck + production build into dist/
 npm run balance    # simulate the default scripts for two years and print each season
 ```
 
-A colony runs two scripts, each in its own editor tab:
+A colony runs a script per role, each in its own editor tab:
 
-- **forager.bee**: every worker bee runs its own copy.
-- **queen.bee**: the queen stays in the hive and decides when to lay eggs.
+- **forager.bee**: every forager runs its own copy. The starting bee is a forager.
+- **Custom roles**: **+ Role** adds up to 5 more (builder.bee, nurse.bee...). A role is
+  just a script; bees hatch into the role the queen names with `lay("builder")` and keep it
+  for life. `role()`, `roles()` and `role_count()` let scripts ask about them.
+- **shared.bee**: functions every worker role can use. It runs ahead of each role's script
+  in the same `Runner`, with its lines numbered from `SHARED_LINE_BASE` so errors and the
+  line highlight can tell the files apart (`locate()` in `world.ts`).
+- **queen.bee**: the queen stays in the hive and decides when to lay eggs, and of which role.
 
 Press **Run** (or Ctrl+Enter). Click a bee, the hive, or a name in the bee list to follow it:
 its card shows its stats and variables, and the editor highlights the line it is running.
@@ -95,8 +101,7 @@ Positions are `[x, y]` tiles. `[0, 0]` is the top-left; `North` is up the screen
 1. Goals per year (survive the winter, reach 20 bees), so each year is a run
 2. The honeycomb view inside the hive, ported from the concept demo
 3. More communication: `dance()` inside the hive
-4. More roles (builder, nurse, guard) with a script tab each
-5. Saving, settings and a Tauri desktop build
+4. Saving, settings and a Tauri desktop build
 
 ## Credits
 

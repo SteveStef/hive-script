@@ -20,9 +20,10 @@
         <section class="intro">
           <h1>Everything a bee can do</h1>
           <p>
-            Your colony runs two scripts. <b>forager.bee</b> runs on every worker bee, and <b>queen.bee</b> runs on
-            the queen, who never leaves the hive. Each card below shows a function, which script can use it, and how
-            much game time it takes.
+            Every worker bee runs its role's script: <b>forager.bee</b>, or one you add with <b>+ Role</b>, like
+            builder.bee. <b>queen.bee</b> runs on the queen, who never leaves the hive and picks each egg's role with
+            <code>lay("builder")</code>. Functions in <b>shared.bee</b> work in every worker role's script. Each card
+            below shows a function, which scripts can use it, and how much game time it takes.
           </p>
           <p>
             The clips are the real game running the example script beside them, on a loop at 2&times; speed. The

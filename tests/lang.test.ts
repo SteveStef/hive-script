@@ -107,3 +107,17 @@ describe('errors point at the right line', () => {
     expect(result.type === 'error' && result.error.line).toBe(3);
   });
 });
+
+describe('line numbers', () => {
+  it('can start from any line, so a file that runs ahead of another keeps its own numbers', () => {
+    expect(parse('x = 1\n\ny = 2', 101).map(s => s.line)).toEqual([101, 103]);
+    expect(() => parse('x = 1\ny = (', 101)).toThrow(ScriptError);
+    let line = 0;
+    try {
+      parse('x = 1\ny = $', 101);
+    } catch (e) {
+      line = (e as ScriptError).line;
+    }
+    expect(line).toBe(102);
+  });
+});

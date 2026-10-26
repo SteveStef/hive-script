@@ -17,9 +17,10 @@ const OPERATORS = ['//=', '//', '==', '!=', '<=', '>=', '+=', '-=', '*=', '/=', 
 
 /**
  * Turns source text into tokens, Python style: indentation becomes INDENT/DEDENT tokens,
- * and line breaks inside brackets are ignored so long lists can span lines.
+ * and line breaks inside brackets are ignored so long lists can span lines. Lines are
+ * numbered from firstLine, so a file that runs ahead of another can keep its own numbers.
  */
-export function lex(source: string): Token[] {
+export function lex(source: string, firstLine = 1): Token[] {
   const tokens: Token[] = [];
   const indents = [0];
   let brackets = 0;
@@ -27,7 +28,7 @@ export function lex(source: string): Token[] {
 
   for (let i = 0; i < lines.length; i++) {
     const text = lines[i];
-    const line = i + 1;
+    const line = i + firstLine;
     let col = 0;
 
     if (brackets === 0) {
@@ -90,7 +91,7 @@ export function lex(source: string): Token[] {
     if (brackets === 0 && tokens.length > before) tokens.push({ kind: 'newline', value: '', line });
   }
 
-  const end = lines.length;
+  const end = lines.length + firstLine - 1;
   if (brackets > 0) throw new ScriptError('A bracket was opened but never closed.', end);
   while (indents.length > 1) {
     indents.pop();

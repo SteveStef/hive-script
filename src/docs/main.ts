@@ -7,12 +7,11 @@ import { Renderer } from '../render/renderer';
 import { TILE } from '../render/scenery';
 import { API_DOCS } from '../sim/apiDocs';
 import { World } from '../sim/world';
-import { demoOptions, DOCS, SECTIONS, type Demo, type DocEntry } from './entries';
+import { demoOptions, demoPrograms, DOCS, SECTIONS, type Demo, type DocEntry } from './entries';
 
 const DEMO_TICKS_PER_SECOND = 30; // twice 1x, so the clips don't drag
 const DEFAULT_LENGTH = 600; // ticks before a clip that never finishes starts over
 const HOLD_TICKS = 45; // a short pause on the last frame before starting over
-const IDLE = 'while True:\n    wait(1000)';
 const API_NAMES = new Set(API_DOCS.map(d => d.name));
 
 // ---- code display ----
@@ -65,7 +64,7 @@ class Clip {
 
   private reset(): void {
     const d = this.demo;
-    this.world = new World({ forager: parse(d.forager ?? IDLE), queen: parse(d.queen ?? IDLE) }, 1, demoOptions(d));
+    this.world = new World(demoPrograms(d), 1, demoOptions(d));
     this.acc = 0;
     this.hold = 0;
   }
@@ -127,7 +126,7 @@ function signature(name: string): string {
 
 function scriptTag(name: string): string {
   const only = API_DOCS.find(d => d.name === name)?.only;
-  return only === 'queen' ? 'queen.bee only' : only === 'forager' ? 'forager.bee only' : 'both scripts';
+  return only === 'queen' ? 'queen.bee only' : only === 'worker' ? 'worker scripts only' : 'every script';
 }
 
 function card(name: string, entry: DocEntry): HTMLElement {

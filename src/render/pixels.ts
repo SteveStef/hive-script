@@ -52,3 +52,21 @@ export function disc(g: CanvasRenderingContext2D, cx: number, cy: number, rx: nu
     }
   }
 }
+
+/** Returns a copy of an image with some exact colors swapped for others ('#rrggbb' keys and values). */
+export function recolor(src: CanvasImageSource & { width: number; height: number }, swap: Record<string, string>): HTMLCanvasElement {
+  const c = sprite(src.width, src.height, g => g.drawImage(src, 0, 0));
+  const g = c.getContext('2d')!;
+  const image = g.getImageData(0, 0, c.width, c.height);
+  const d = image.data;
+  for (let i = 0; i < d.length; i += 4) {
+    if (!d[i + 3]) continue;
+    const to = swap['#' + [d[i], d[i + 1], d[i + 2]].map(v => v.toString(16).padStart(2, '0')).join('')];
+    if (!to) continue;
+    d[i] = parseInt(to.slice(1, 3), 16);
+    d[i + 1] = parseInt(to.slice(3, 5), 16);
+    d[i + 2] = parseInt(to.slice(5, 7), 16);
+  }
+  g.putImageData(image, 0, 0);
+  return c;
+}

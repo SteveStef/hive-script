@@ -5,6 +5,13 @@ import { DIRS, MAX_ENERGY, MAX_WAIT, SCENT_NAME_MAX, type Bee, type World } from
 
 const act = (action: string, args: Value[] = []): ActionRequest => ({ action, args });
 
+/** A role name a script passed in: it must be text, and one of the colony's roles. */
+function roleName(world: World, name: string, v: Value, line: number): string {
+  if (typeof v !== 'string') throw new ScriptError(`${name}() needs a role's name as text, like "forager", not ${format(v, true)}.`, line);
+  if (!world.roleNames.includes(v)) throw new ScriptError(`There's no role called "${v}". Your roles: ${world.roleNames.join(', ')}.`, line);
+  return v;
+}
+
 /** Senses about the whole colony, plus wait(); both the queen and the workers get these. */
 function colonyGlobals(world: World): Record<string, Value> {
   return {
@@ -16,6 +23,15 @@ function colonyGlobals(world: World): Record<string, Value> {
     season: builtin('season', () => world.season),
     season_left: builtin('season_left', () => world.seasonLeft),
     year: builtin('year', () => world.year),
+    roles: builtin('roles', (args, line) => {
+      expectArgs('roles', args, 0, line);
+      return world.roleNames;
+    }),
+    role_count: builtin('role_count', (args, line) => {
+      expectArgs('role_count', args, 1, line);
+      const role = roleName(world, 'role_count', args[0], line);
+      return world.bees.filter(b => b.role === role).length;
+    }),
     wait: builtin('wait', (args, line) => {
       expectArgs('wait', args, 1, line);
       const n = args[0];
@@ -87,6 +103,7 @@ export function beeGlobals(world: World, bee: Bee): Record<string, Value> {
     }),
 
     // senses about this bee: these answer instantly
+    role: builtin('role', () => bee.role),
     get_pos: builtin('get_pos', () => [bee.x, bee.y]),
     hive_pos: builtin('hive_pos', () => [world.hive.x, world.hive.y]),
     nectar: builtin('nectar', () => bee.carrying),
@@ -114,7 +131,7 @@ export function beeGlobals(world: World, bee: Bee): Record<string, Value> {
 }
 
 // Worker actions the queen might reach for; each gets a clear explanation instead of "not defined".
-const WORKER_ONLY = ['move', 'move_to', 'go_home', 'collect', 'deposit', 'eat', 'build', 'mark', 'die'];
+const WORKER_ONLY = ['move', 'move_to', 'go_home', 'collect', 'deposit', 'eat', 'build', 'mark', 'die', 'role'];
 
 /** Everything the queen's script (queen.bee) can see. */
 export function queenGlobals(world: World): Record<string, Value> {
@@ -122,13 +139,13 @@ export function queenGlobals(world: World): Record<string, Value> {
     ...coreBuiltins(text => world.say('queen', text)),
     ...colonyGlobals(world),
     lay: builtin('lay', (args, line) => {
-      expectArgs('lay', args, 0, line);
-      return act('lay');
+      if (args.length > 1) throw new ScriptError(`lay() takes a role's name, or nothing for a forager, but got ${args.length} values.`, line);
+      return act('lay', args.length ? [roleName(world, 'lay', args[0], line)] : []);
     }),
   };
   for (const name of WORKER_ONLY) {
     globals[name] = builtin(name, (_args, line) => {
-      throw new ScriptError(`The queen never leaves the hive or works; ${name}() is for worker bees in forager.bee.`, line);
+      throw new ScriptError(`The queen never leaves the hive or works; ${name}() is for worker bees, in forager.bee or another role's script.`, line);
     });
   }
   return globals;

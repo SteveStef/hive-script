@@ -26,11 +26,7 @@
     </header>
     <main class="layout">
       <section class="code">
-        <div class="tabs" role="tablist">
-          <button type="button" class="file-tab" role="tab" data-file="forager" aria-selected="true">forager.bee</button>
-          <button type="button" class="file-tab" role="tab" data-file="queen" aria-selected="false">queen.bee</button>
-          <span class="tab-note" id="tab-note">every worker bee runs this</span>
-        </div>
+        <div class="tabs" role="tablist" id="tabs"></div>
         <div id="editor"></div>
         <div class="console-head">Log</div>
         <div id="console" class="console" aria-live="polite"></div>
@@ -52,6 +48,7 @@
               <div class="stat"><b id="s-deaths">0</b><span>Died</span></div>
               <div class="stat"><b id="s-tick">0</b><span>Tick</span></div>
             </div>
+            <div class="role-counts" id="role-counts" hidden></div>
             <div class="chips-head">Follow a bee</div>
             <div class="chips" id="bee-chips"></div>
             <div class="status" id="status">Hover the meadow to see tile positions.</div>

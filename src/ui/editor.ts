@@ -29,17 +29,18 @@ monaco.languages.setLanguageConfiguration(LANGUAGE, {
   // indent after a line ending in ":" (if, while, def...)
   onEnterRules: [{ beforeText: /:\s*(#.*)?$/, action: { indentAction: monaco.languages.IndentAction.Indent } }],
 });
-const fileOf = (model: monaco.editor.ITextModel): ScriptFile => (model.uri.path === '/queen.bee' ? 'queen' : 'forager');
+/** Whether a file is the queen's script; every other file (each role, shared.bee) is a worker script. */
+const isQueen = (model: monaco.editor.ITextModel) => model.uri.path === '/queen.bee';
+const fits = (only: 'worker' | 'queen' | undefined, model: monaco.editor.ITextModel) => !only || (only === 'queen') === isQueen(model);
 
 monaco.languages.registerCompletionItemProvider(LANGUAGE, {
   provideCompletionItems(model, position) {
-    const file = fileOf(model);
     const word = model.getWordUntilPosition(position);
     const range = new monaco.Range(position.lineNumber, word.startColumn, position.lineNumber, word.endColumn);
     const { CompletionItemKind, CompletionItemInsertTextRule } = monaco.languages;
     return {
       suggestions: [
-        ...API_DOCS.filter(d => !d.only || d.only === file).map(d => ({
+        ...API_DOCS.filter(d => fits(d.only, model)).map(d => ({
           label: d.name,
           kind: d.constant ? CompletionItemKind.Constant : CompletionItemKind.Function,
           detail: d.signature,
@@ -56,8 +57,7 @@ monaco.languages.registerCompletionItemProvider(LANGUAGE, {
 monaco.languages.registerHoverProvider(LANGUAGE, {
   provideHover(model, position) {
     const word = model.getWordAtPosition(position);
-    const file = fileOf(model);
-    const doc = word && API_DOCS.find(d => d.name === word.word && (!d.only || d.only === file));
+    const doc = word && API_DOCS.find(d => d.name === word.word && fits(d.only, model));
     return doc ? { contents: [{ value: '`' + doc.signature + '`' }, { value: doc.doc }] } : null;
   },
 });
@@ -83,6 +83,10 @@ monaco.editor.defineTheme('hive', {
 
 export interface CodeEditor {
   getValue(file: ScriptFile): string;
+  /** Adds a file (a new role's script). */
+  addFile(file: ScriptFile, code: string): void;
+  /** Removes a file; if it was showing, the editor switches to forager.bee. */
+  removeFile(file: ScriptFile): void;
   /** Switches the editor to a file. */
   show(file: ScriptFile): void;
   onShow(listener: (file: ScriptFile) => void): void;
@@ -93,13 +97,24 @@ export interface CodeEditor {
   setActiveLine(file: ScriptFile | null, line: number | null): void;
 }
 
-const FILES: ScriptFile[] = ['forager', 'queen'];
-
+/** One Monaco model per script file, keyed by its name without ".bee". */
 export function createEditor(host: HTMLElement, initial: Record<ScriptFile, string>): CodeEditor {
-  const models = {} as Record<ScriptFile, monaco.editor.ITextModel>;
-  for (const f of FILES) models[f] = monaco.editor.createModel(initial[f], LANGUAGE, monaco.Uri.parse(`file:///${f}.bee`));
+  const models = new Map<ScriptFile, monaco.editor.ITextModel>();
+  const highlights = new Map<ScriptFile, string[]>();
+  const showListeners: ((file: ScriptFile) => void)[] = [];
+  const changeListeners: ((file: ScriptFile, code: string) => void)[] = [];
+  let active: { file: ScriptFile | null; line: number | null } = { file: null, line: null };
+
+  const addFile = (file: ScriptFile, code: string) => {
+    const model = monaco.editor.createModel(code, LANGUAGE, monaco.Uri.parse(`file:///${file}.bee`));
+    model.onDidChangeContent(() => changeListeners.forEach(l => l(file, model.getValue())));
+    models.set(file, model);
+    highlights.set(file, []);
+  };
+  for (const [file, code] of Object.entries(initial)) addFile(file, code);
+
   const editor = monaco.editor.create(host, {
-    model: models.forager,
+    model: models.get('forager')!,
     theme: 'hive',
     fontFamily: '"JetBrains Mono", ui-monospace, Menlo, monospace',
     fontSize: 14,
@@ -111,32 +126,40 @@ export function createEditor(host: HTMLElement, initial: Record<ScriptFile, stri
     automaticLayout: true,
     padding: { top: 10 },
   });
-  const showListeners: ((file: ScriptFile) => void)[] = [];
-  const highlights = { forager: [] as string[], queen: [] as string[] };
-  let active: { file: ScriptFile | null; line: number | null } = { file: null, line: null };
 
   const show = (file: ScriptFile) => {
-    if (editor.getModel() === models[file]) return;
-    editor.setModel(models[file]);
+    const model = models.get(file);
+    if (!model || editor.getModel() === model) return;
+    editor.setModel(model);
     showListeners.forEach(l => l(file));
   };
 
   return {
-    getValue: file => models[file].getValue(),
+    getValue: file => models.get(file)?.getValue() ?? '',
+    addFile,
+    removeFile: file => {
+      const model = models.get(file);
+      if (!model) return;
+      if (editor.getModel() === model) show('forager');
+      if (active.file === file) active = { file: null, line: null };
+      models.delete(file);
+      highlights.delete(file);
+      model.dispose();
+    },
     show,
     onShow: listener => {
       showListeners.push(listener);
     },
     onChange: listener => {
-      for (const f of FILES) models[f].onDidChangeContent(() => listener(f, models[f].getValue()));
+      changeListeners.push(listener);
     },
     onRun: listener => {
       editor.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyCode.Enter, listener);
     },
     setError: error => {
-      for (const f of FILES) monaco.editor.setModelMarkers(models[f], 'hive', []);
-      if (!error) return;
-      const model = models[error.file];
+      for (const model of models.values()) monaco.editor.setModelMarkers(model, 'hive', []);
+      const model = error && models.get(error.file);
+      if (!error || !model) return;
       const line = Math.min(Math.max(error.line, 1), model.getLineCount());
       monaco.editor.setModelMarkers(model, 'hive', [{
         startLineNumber: line,
@@ -152,9 +175,9 @@ export function createEditor(host: HTMLElement, initial: Record<ScriptFile, stri
     setActiveLine: (file, line) => {
       if (file === active.file && line === active.line) return;
       active = { file, line };
-      for (const f of FILES) {
+      for (const [f, model] of models) {
         const on = f === file && line ? [{ range: new monaco.Range(line, 1, line, 1), options: { isWholeLine: true, className: 'active-line', linesDecorationsClassName: 'active-line-gutter' } }] : [];
-        highlights[f] = models[f].deltaDecorations(highlights[f], on);
+        highlights.set(f, model.deltaDecorations(highlights.get(f)!, on));
       }
     },
   };

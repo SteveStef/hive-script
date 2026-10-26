@@ -1,5 +1,5 @@
 import { format, type Runner } from '../lang/interpreter';
-import { BEE_COST, ENERGY_PER_TILE, MAX_ENERGY, type Bee, type Queen, type World } from '../sim/world';
+import { BEE_COST, ENERGY_PER_TILE, locate, MAX_ENERGY, type Bee, type Queen, type ScriptFile, type World } from '../sim/world';
 
 const HUNGRY = 25;
 const LONG_VALUE = 48;
@@ -27,7 +27,7 @@ export function beeStatus(bee: Bee): { label: string; tone: StatusTone } {
 }
 
 /** The stats card for one bee, as HTML. Anything from the player's script is escaped. */
-export function beeCard(bee: Bee, sourceLines: string[], ticksPerSecond: number): string {
+export function beeCard(bee: Bee, sourceLines: Record<ScriptFile, string[]>, ticksPerSecond: number): string {
   const status = beeStatus(bee);
   const alive = bee.death === null;
   const n = (v: number) => Math.floor(v).toLocaleString('en-US');
@@ -38,12 +38,13 @@ export function beeCard(bee: Bee, sourceLines: string[], ticksPerSecond: number)
   const lifeLeft = bee.lifespan - bee.age;
   const energyTone = bee.energy < HUNGRY ? 'low' : bee.energy < 50 ? 'mid' : 'good';
 
+  const at = locate(bee.role, bee.runner.line);
   const where = alive
-    ? `<span class="k">Line ${bee.runner.line}</span><code>${esc(sourceLines[bee.runner.line - 1]?.trim() ?? '')}</code>`
+    ? `<span class="k">${at.file === bee.role ? '' : `${at.file}.bee `}Line ${at.line}</span><code>${esc(sourceLines[at.file]?.[at.line - 1]?.trim() ?? '')}</code>`
     : `<span class="k">Died</span>at tick ${n(bee.death!.tick)}, on tile [${bee.x}, ${bee.y}]`;
 
   return `
-    <div class="card-head"><b>Bee #${bee.id}</b><span class="badge ${status.tone}">${status.label}</span></div>
+    <div class="card-head"><b>Bee #${bee.id} · ${esc(bee.role)}</b><span class="badge ${status.tone}">${status.label}</span></div>
     <div class="card-line">${where}</div>
     <div class="meters">
       <span class="k">Nectar</span>${bar(bee.carrying, bee.capacity, 'nectar')}

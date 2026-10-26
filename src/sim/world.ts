@@ -50,6 +50,11 @@ export const START_COMB = 10; // cells; every bee and every egg needs one
 export const COMB_LIMIT = 120;
 export const BEE_LIMIT = 120; // a safety ceiling for performance; comb is the real limit
 export const BEE_COST = 10; // honey per egg
+export const MAX_ROLES = 5; // custom roles, on top of forager
+export const ROLE_NAME = /^[a-z][a-z0-9_]{0,11}$/; // lowercase, up to 12 characters
+export const RESERVED_NAMES = ['forager', 'queen', 'shared']; // file names a custom role can't take
+/** Lines of shared.bee are numbered from here, so they can't be mistaken for a role script's own lines. */
+export const SHARED_LINE_BASE = 100_000;
 export const HATCH_TICKS = 300;
 export const BUILD_COST = 15; // honey turned into wax for one cell of comb
 const EMPTY_HIVE_TICKS = 900; // with no bees or eggs for this long, the colony is over
@@ -82,12 +87,20 @@ export type Dir = 'north' | 'south' | 'east' | 'west';
 export const DIRS: Dir[] = ['north', 'south', 'east', 'west'];
 export const STEP: Record<Dir, [number, number]> = { north: [0, -1], south: [0, 1], east: [1, 0], west: [-1, 0] };
 
-/** The two scripts a colony runs. */
+/** The scripts a colony runs: one per role, the queen's, and code shared by every role. */
 export interface Programs {
   forager: Stmt[];
   queen: Stmt[];
+  roles?: Record<string, Stmt[]>; // custom roles by name
+  shared?: Stmt[]; // runs ahead of every role's script; parse it with firstLine SHARED_LINE_BASE + 1
 }
-export type ScriptFile = keyof Programs;
+/** A script file's name without ".bee": "queen", "shared", "forager" or a custom role's name. */
+export type ScriptFile = string;
+
+/** Which file a line of a worker's program is in: shared.bee's lines are numbered past SHARED_LINE_BASE. */
+export function locate(role: string, line: number): { file: ScriptFile; line: number } {
+  return line > SHARED_LINE_BASE ? { file: 'shared', line: line - SHARED_LINE_BASE } : { file: role, line };
+}
 
 export interface Tile {
   x: number;
@@ -120,6 +133,7 @@ export interface BeeStats {
 
 export interface Bee extends Tile {
   id: number;
+  role: string; // fixed for life
   facing: Dir;
   carrying: number;
   capacity: number;
@@ -141,6 +155,7 @@ export interface Queen {
 }
 
 export interface Egg {
+  role: string;
   laidAt: number;
   hatchAt: number;
 }
@@ -361,8 +376,8 @@ export class World {
     this.stepQueen();
     if (this.error) return;
     while (this.eggs.length && this.eggs[0].hatchAt <= this.tick) {
-      this.eggs.shift();
-      const bee = this.spawn();
+      const egg = this.eggs.shift()!;
+      const bee = this.spawn(egg.role);
       this.say(bee, 'Hatched.', 'note');
     }
     this.checkSurvival();
@@ -410,14 +425,22 @@ export class World {
     if (this.over) this.say(null, this.over, 'death');
   }
 
-  private spawn(): Bee {
+  /** Every role's name, forager first. */
+  get roleNames(): string[] {
+    return ['forager', ...Object.keys(this.programs?.roles ?? {})];
+  }
+
+  private spawn(role = 'forager'): Bee {
     const lifespan = LIFESPAN_MIN + Math.floor(this.rng() * (LIFESPAN_MAX - LIFESPAN_MIN));
     const bee = {
-      id: this.nextId++, x: this.hive.x, y: this.hive.y, facing: 'south', carrying: 0, capacity: 3,
+      id: this.nextId++, role, x: this.hive.x, y: this.hive.y, facing: 'south', carrying: 0, capacity: 3,
       energy: MAX_ENERGY, age: 0, lifespan, bornAt: this.tick, action: null, death: null,
       stats: { collected: 0, delivered: 0, tilesFlown: 0, honeyEaten: 0, built: 0 },
     } as Omit<Bee, 'runner'> as Bee;
-    bee.runner = new Runner(this.programs!.forager, beeGlobals(this, bee));
+    const programs = this.programs!;
+    const own = role === 'forager' ? programs.forager : programs.roles![role];
+    // shared.bee runs first, so its functions are defined before the role's own code needs them
+    bee.runner = new Runner([...(programs.shared ?? []), ...own], beeGlobals(this, bee));
     this.bees.push(bee);
     this.events.push({ type: 'hatch', id: bee.id });
     return bee;
@@ -436,7 +459,7 @@ export class World {
         const ok = this.honey >= BEE_COST && this.space > 0 && this.bees.length + this.eggs.length < BEE_LIMIT;
         if (ok) {
           this.honey -= BEE_COST;
-          this.eggs.push({ laidAt: this.tick, hatchAt: this.tick + HATCH_TICKS });
+          this.eggs.push({ role: (result.args[0] as string | undefined) ?? 'forager', laidAt: this.tick, hatchAt: this.tick + HATCH_TICKS });
           q.laid++;
           this.events.push({ type: 'lay' });
         }
@@ -469,8 +492,9 @@ export class World {
     const result = bee.runner.run(OPS_PER_TICK);
     if (result.type === 'action') this.begin(bee, result.action, result.args);
     else if (result.type === 'error') {
-      this.error = { message: result.error.message, line: result.error.line, file: 'forager', beeId: bee.id };
-      this.say(bee, `forager.bee line ${result.error.line}: ${result.error.message}`, 'error');
+      const at = locate(bee.role, result.error.line);
+      this.error = { message: result.error.message, line: at.line, file: at.file, beeId: bee.id };
+      this.say(bee, `${at.file}.bee line ${at.line}: ${result.error.message}`, 'error');
     } else if (result.type === 'done') this.say(bee, 'Reached the end of the script and stopped.', 'note');
   }
 

@@ -1,7 +1,9 @@
 import {
   BEE_COST, BUILD_COST, BUILD_TICKS, COLLECT_TICKS, DEPOSIT_TICKS, EAT_TICKS, ENERGY_PER_HONEY, HATCH_TICKS, LAY_TICKS,
-  BLOOMS, MARK_TICKS, MOVE_TICKS, SCENT_LIFE, SCENT_MAX, SEASON_TICKS, SENSE_RANGE, SMELL_RANGE, type WorldOptions,
+  BLOOMS, MARK_TICKS, MOVE_TICKS, SCENT_LIFE, SCENT_MAX, SEASON_TICKS, SENSE_RANGE, SHARED_LINE_BASE, SMELL_RANGE,
+  type Programs, type WorldOptions,
 } from '../sim/world';
+import { parse } from '../lang/parser';
 
 /** A small scene the docs page plays on loop: real game, real scripts. */
 export interface Demo {
@@ -14,6 +16,7 @@ export interface Demo {
   tick?: number;
   energy?: number;
   comb?: number;
+  roles?: Record<string, string>; // custom roles' scripts, by name
   sight?: boolean; // draw the circle of what the bee can see
   length?: number; // ticks before the clip starts over, if the script hasn't finished
 }
@@ -28,7 +31,7 @@ export interface DocEntry {
   covers?: string[]; // other names this card also explains
 }
 
-export const SECTIONS = ['Moving', 'Working', 'What a bee knows', 'Scent', 'The queen', 'The colony', 'Time and seasons', 'Utilities', 'Language helpers'];
+export const SECTIONS = ['Moving', 'Working', 'What a bee knows', 'Scent', 'The queen', 'Roles', 'The colony', 'Time and seasons', 'Utilities', 'Language helpers'];
 
 // Clips use one fixed meadow, so the positions in their scripts always land on flowers.
 // (In the game, flowers bloom in new places every season.) The hive sits at [2, 6].
@@ -41,6 +44,14 @@ const DEMO_MEADOW: [number, number][] = [
   [13, 1], [14, 1], [14, 2],
   [16, 9], [17, 9], [17, 10], [18, 9],
 ];
+
+const IDLE = 'while True:\n    wait(1000)';
+
+/** The scripts a clip runs; an idle bee or queen where it leaves one out. */
+export function demoPrograms(d: Demo): Programs {
+  const roles = Object.fromEntries(Object.entries(d.roles ?? {}).map(([name, src]) => [name, parse(src)]));
+  return { forager: parse(d.forager ?? IDLE), queen: parse(d.queen ?? IDLE), roles, shared: parse('', SHARED_LINE_BASE + 1) };
+}
 
 /** The world a clip starts from. */
 export function demoOptions(d: Demo): WorldOptions {
@@ -115,10 +126,14 @@ export const DOCS: Record<string, DocEntry> = {
 
   die: {
     section: 'Working',
-    details: 'Ends the bee\'s life on the spot, the way old or sick honeybees fly off so they don\'t burden the hive. A dead bee eats no more honey and frees its cell of comb for a new egg, so it can be the right call for an old bee in winter, when every honey counts: "if season() == "winter" and life_left() < 600: die()". Whatever nectar it carries is lost, and its script stops: nothing after die() runs.',
+    details: 'Ends the bee\'s life on the spot, the way old or sick honeybees fly off so they don\'t burden the hive. A dead bee eats no more honey and frees its cell of comb for a new egg, so it can be the right call for an old bee in winter, when every honey counts: "if season() == "winter" and life_left() < 600: die()". Whatever nectar it carries is lost, and its script stops: nothing after die() runs. In the clip the hive is full, so the queen can only lay once the bee is gone.',
     returns: 'Nothing: the bee is gone.',
     time: instant,
-    demo: { forager: 'move(East)\nprint("free cells:", space())\nprint("my work here is done")\ndie()\nprint("this line never runs")', view: HIVE_VIEW, length: 200 },
+    // the hive is full until the bee dies; then the queen lays in its cell
+    demo: {
+      forager: 'move(East)\nprint("free cells:", space())\nprint("my work here is done")\ndie()\nprint("this line never runs")',
+      queen: 'while not lay():\n    wait(5)', comb: 1, honey: 20, view: HIVE_VIEW, length: 200,
+    },
   },
 
   // ---- what a bee knows ----
@@ -208,13 +223,34 @@ export const DOCS: Record<string, DocEntry> = {
   // ---- the queen ----
   lay: {
     section: 'The queen',
-    details: `Only the queen can lay, from queen.bee. An egg costs ${BEE_COST} honey and needs a free cell of comb. It hatches after ${HATCH_TICKS} ticks into a worker that runs forager.bee. Laying too eagerly is the classic way to starve a colony before winter.`,
+    details: `Only the queen can lay, from queen.bee. An egg costs ${BEE_COST} honey and needs a free cell of comb. It hatches after ${HATCH_TICKS} ticks into a bee of the role you name, like lay("builder"), which runs that role's script for life; lay() with no name lays a forager. Naming a role that doesn't exist stops the game with an error, so typos show up right away. Laying too eagerly is the classic way to starve a colony before winter.`,
     returns: 'True if she laid an egg; False without enough honey or free comb.',
     time: `${LAY_TICKS} ticks`,
     demo: {
       queen: 'laid = lay()\nprint("laid an egg:", laid, "| eggs:", egg_count())\nwait(320)\nprint("hatched! bees:", bee_count())',
       view: HIVE_VIEW, follow: 'queen', honey: 20, length: 420,
     },
+  },
+
+  // ---- roles ----
+  role_count: {
+    section: 'Roles',
+    details: 'Besides forager, you can make up to five roles of your own with the "+ Role" button above the editor. Each role is its own script tab, and every bee the queen lays with lay("that name") runs it for life. role_count() tells you how many living bees have a role, so the queen can keep the mix she wants; roles() lists every role\'s name, forager first.',
+    returns: 'role_count(): a whole number. roles(): a list of names, like ["forager", "builder"].',
+    time: instant,
+    covers: ['roles'],
+    demo: {
+      queen: 'print("roles:", roles())\nprint("builders:", role_count("builder"))\nlay("builder")\nwait(320)\nprint("builders:", role_count("builder"))',
+      roles: { builder: 'while True:\n    wait(100)' },
+      view: HIVE_VIEW, follow: 'queen', honey: 20, length: 420,
+    },
+  },
+  role: {
+    section: 'Roles',
+    details: 'The name of the role this bee hatched as. A role never changes. Each role has its own script already, so role() is most useful in shared.bee: functions there run for every role, and can check role() to act differently for each one.',
+    returns: 'Text, like "forager" or "builder".',
+    time: instant,
+    demo: { forager: 'print("my role is", role())\nprint("every role:", roles())', roles: { builder: 'while True:\n    wait(100)' }, view: HIVE_VIEW, length: 120 },
   },
 
   // ---- the colony ----
