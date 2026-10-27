@@ -54,6 +54,13 @@ function validMap(m: unknown): Tile | null {
 }
 
 /** A hive tile the browser sent, in world tiles; not checked against the map yet. */
+/** A stretch of real time as hours and minutes, like "5h 12m" or "40m". */
+function duration(ms: number): string {
+  const minutes = Math.max(1, Math.round(ms / 60_000));
+  const h = Math.floor(minutes / 60);
+  return h ? `${h}h ${minutes % 60}m` : `${minutes}m`;
+}
+
 function validTile(t: unknown): Tile | null {
   const v = t as Tile | undefined;
   return v && Number.isInteger(v.x) && Number.isInteger(v.y) ? { x: v.x, y: v.y } : null;
@@ -153,9 +160,28 @@ export class WorldServer {
     await this.sql`INSERT INTO events ${this.sql(rows, 'user_id', 'tick', 'tone', 'text')}`;
   }
 
-  /** A colony that died out leaves the world, and its map is free for anyone. */
+  /**
+   * Protection for a colony about to be founded. It runs for shieldMs from the player's first
+   * colony in a window: a colony founded again inside it only gets what was left, and none if the
+   * last one attacked another player, so abandoning a colony can't reset it.
+   */
+  private async shieldFor(userId: number): Promise<{ ends: number | null; fresh: boolean }> {
+    const [row] = await this.sql<{ started: Date | null; broken: boolean }[]>`SELECT shield_started_at AS started, shield_broken AS broken FROM users WHERE id = ${userId}`;
+    const now = Date.now();
+    if (row?.started && now - row.started.getTime() < this.shieldMs) {
+      return { ends: row.broken ? null : row.started.getTime() + this.shieldMs, fresh: false };
+    }
+    await this.sql`UPDATE users SET shield_started_at = ${new Date(now)}, shield_broken = false WHERE id = ${userId}`;
+    return { ends: now + this.shieldMs, fresh: true };
+  }
+
+  /** A colony that died out (or was abandoned) leaves the world, and its map is free for anyone. */
   private async retire(seat: Seat): Promise<void> {
     const reason = seat.colony.over!;
+    if (!seat.colony.shielded) {
+      // it lost its protection by attacking while its window was still open: no more for the rest of it
+      await this.sql`UPDATE users SET shield_broken = true WHERE id = ${seat.userId} AND shield_started_at > ${new Date(Date.now() - this.shieldMs)}`;
+    }
     seat.live.world.remove(seat.colony);
     this.seats.delete(seat.userId);
     this.fallen.set(seat.userId, reason);
@@ -351,11 +377,19 @@ export class WorldServer {
         hive = t;
       }
       const colony = live.world.found(parsed.programs, map, user.username, hive);
-      colony.shielded = true;
-      colony.shieldEnds = Date.now() + this.shieldMs;
+      const shield = await this.shieldFor(user.id);
+      colony.shieldEnds = shield.ends;
+      colony.shielded = shield.ends !== null;
       colony.say(null, `Your colony was founded on map [${map.x}, ${map.y}] of world #${live.id}. It keeps running while you're away.`, 'note');
-      const hours = Math.round(this.shieldMs / 3_600_000);
-      colony.say(null, `As a new colony it's protected for ${hours} hour${hours === 1 ? '' : 's'}: other players can't raid or sting it, and wild wasps leave its bees alone. Attacking another player ends the protection early.`, 'note');
+      const what = "other players can't raid or sting it, and wild wasps leave its bees alone. Attacking another player ends the protection early.";
+      if (shield.fresh) {
+        const hours = Math.round(this.shieldMs / 3_600_000);
+        colony.say(null, `As a new colony it's protected for ${hours} hour${hours === 1 ? '' : 's'}: ${what}`, 'note');
+      } else if (shield.ends !== null) {
+        colony.say(null, `It's protected for ${duration(shield.ends - Date.now())} more, what was left of the protection your last colony started: ${what}`, 'note');
+      } else {
+        colony.say(null, `This colony isn't protected: your last colony attacked another player less than ${Math.round(this.shieldMs / 3_600_000)} hours ago, which ended your protection.`, 'note');
+      }
       await sql`INSERT INTO deploys (user_id, files) VALUES (${user.id}, ${sql.json(set as never)})`;
       await sql`INSERT INTO colonies (user_id, world_id, colony_id, map_x, map_y) VALUES (${user.id}, ${live.id}, ${colony.id}, ${map.x}, ${map.y})`;
       const seat: Seat = { userId: user.id, live, colony, loggedSeq: -1 };
@@ -369,6 +403,21 @@ export class WorldServer {
         socket.send(this.stateMessage(live, w));
       }
       return this.status(user.id);
+    });
+
+    // Ends the player's colony by choice: its bees, wasps, nest and honey are gone and its map is free.
+    app.post('/api/colony/abandon', async (req, reply) => {
+      const user = await requireUser(sql, req, reply);
+      if (!user) return;
+      await this.ticking;
+      const seat = this.seats.get(user.id);
+      if (!seat) return reply.code(404).send({ error: 'You have no colony to abandon.' });
+      const { map } = seat.colony;
+      seat.colony.over = 'You abandoned the colony.';
+      seat.colony.say(null, `Abandoned the colony on map [${map.x}, ${map.y}]: its bees, wasps and honey are gone, and the map is free.`, 'death');
+      await this.recordEvents(seat);
+      await this.retire(seat);
+      return { ok: true };
     });
 
     // Every bee and the queen switch to the new code at the next tick.

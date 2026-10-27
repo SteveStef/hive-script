@@ -1,4 +1,4 @@
-import { DEFAULT_SHARED, DEFAULT_WASP } from '../defaultScript';
+import { DEFAULT_SHARED } from '../defaultScript';
 import { parse } from '../lang/parser';
 import type { ScriptSet } from '../sim/scripts';
 import { SEASON_TICKS, World, type Programs, type ScriptFile, type WorldOptions } from '../sim/world';
@@ -62,6 +62,15 @@ function practice(flowers: [number, number][], setup: (world: World) => void, ri
 /** Scripts for a lesson's rival colony. */
 const rivalPrograms = (forager: string, queen = IDLE): Programs => ({ forager: parse(forager), queen: parse(queen), shared: parse(DEFAULT_SHARED) });
 // the rival in the wasps lesson raids your hive with every bee it has, and keeps laying more
+// the Wasps lesson's solution: stand beside the hive and sting whatever lands next to you
+const GUARD_WASP = `# wasp.bee: wasps guard the hive and sting enemies next to them.
+while True:
+    enemies = enemies_near()
+    if enemies and distance(get_pos(), enemies[0]) == 1:
+        sting(enemies[0])
+    else:
+        move_to([hive_pos()[0] + 1, hive_pos()[1]])
+`;
 const RAIDER = 'while True:\n    move_to([2, 6])\n    steal()\n    go_home()\n    deposit()\n';
 const RAIDER_QUEEN = 'while True:\n    if bee_count() < 2 and honey() >= 10:\n        lay()\n    wait(60)\n';
 // a forager that works, for lessons about something else
@@ -300,7 +309,7 @@ export const LESSONS: Lesson[] = [
     title: 'A world of maps',
     intro: `
       <p>Multiplayer is a world of 5 × 5 maps, each 20 × 12 tiles, shared by up to 25 players. You found your colony by picking a free map on the <b>World map</b> and clicking where its hive goes (anywhere with no flowers under it),
-      press <b>Deploy</b> to send your scripts (bees start the new code at once), and the colony keeps working while you're away. The <b>Chat</b> and <b>Leaders</b> tabs sit beside the log.</p>
+      press <b>Deploy</b> to send your scripts (bees start the new code at once), and the colony keeps working while you're away. To start over somewhere else, <b>Abandon colony</b> at the bottom of the world map ends it. The <b>Chat</b> and <b>Leaders</b> tabs sit beside the log.</p>
       <p>Positions are one big grid: map ${code('[1, 0]')} starts at x 20. ${fn('my_map')} and ${fn('map_at', 'position')} give map numbers.
       A <b>hedgerow</b> runs along every border and around the world, and nothing flies through it. Each border has one <b>gate</b>, two tiles wide:
       ${fn('move_to')} finds it by itself, ${fn('distance', 'a, b')} counts the way through it, and ${fn('gates')} lists your map's gates, nearest first.
@@ -353,7 +362,7 @@ export const LESSONS: Lesson[] = [
       <p><b>Do this:</b> you've saved 200 honey. Build a nest, lay a wasp, and make wasp.bee guard the hive until it stings a raider to death.</p>`,
     tabs: ['queen', 'wasp'],
     starter: { queen: 'while True:\n    wait(100)\n', wasp: '# wasp.bee: every wasp runs this.\nwhile True:\n    wait(100)\n' },
-    solution: { queen: 'build_nest([5, 6])\nlay("wasp")\nwhile True:\n    wait(100)\n', wasp: DEFAULT_WASP },
+    solution: { queen: 'build_nest([5, 6])\nlay("wasp")\nwhile True:\n    wait(100)\n', wasp: GUARD_WASP },
     world: practice([], w => (w.colony.honey = 200), { programs: rivalPrograms(RAIDER, RAIDER_QUEEN), honey: 30 }),
     goals: [
       { text: 'Build the wasp nest', check: w => w.colony.nest !== null },

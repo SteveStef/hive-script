@@ -313,4 +313,49 @@ describe('the shared world', () => {
     const ended = await sql`SELECT text FROM events WHERE tone = 'raid'`;
     expect(ended.some(e => String(e.text).includes('protection as a new colony has ended'))).toBe(true);
   });
+
+  const abandon = (cookie: string) => app.inject({ method: 'POST', url: '/api/colony/abandon', ...as(cookie) });
+  const myShield = async (cookie: string) => (await app.inject({ url: '/api/world', ...as(cookie) })).json().maps.find((m: { mine: boolean }) => m.mine)?.shieldEnds ?? null;
+
+  it('abandons a colony: its map is free, and a colony founded again keeps only what was left of the protection', async () => {
+    const cookie = await signup('quitter');
+    expect((await abandon(cookie)).statusCode).toBe(404); // nothing to abandon yet
+    await start(cookie, { x: 1, y: 1 });
+    const firstShield = await myShield(cookie);
+    expect(firstShield).toBeGreaterThan(Date.now());
+    await ticks(5);
+
+    expect((await abandon(cookie)).statusCode).toBe(200);
+    expect((await app.inject({ url: '/api/colony', ...as(cookie) })).json().exists).toBe(false);
+    const world = (await app.inject({ url: '/api/world', ...as(cookie) })).json();
+    expect(world.home).toBeNull();
+    expect(world.fallen).toBe('You abandoned the colony.');
+    expect(world.maps.find((m: { map: { x: number; y: number } }) => m.map.x === 1 && m.map.y === 1).owner).toBeNull();
+    expect((await sql`SELECT text FROM events`).some(e => String(e.text).includes('Abandoned the colony on map [1, 1]'))).toBe(true);
+
+    await start(cookie, { x: 3, y: 2 });
+    expect(Math.abs((await myShield(cookie)) - firstShield)).toBeLessThan(1000); // the same window, not a fresh 24 hours
+    expect((await sql`SELECT text FROM events`).some(e => String(e.text).includes('what was left of the protection'))).toBe(true);
+  });
+
+  it('a colony that attacked and was abandoned is followed by one with no protection; after the window, protection is fresh', async () => {
+    await app.close();
+    ({ app, worlds } = await buildApp(sql, { nests: 0, shieldMs: 400 }));
+    const cookie = await signup('raider_q');
+    await start(cookie, { x: 1, y: 1 });
+    // as if its bees had attacked another player: the protection ended early
+    const seats = (worlds as unknown as { seats: Map<number, { colony: { shielded: boolean; shieldEnds: number | null } }> }).seats;
+    const colony = [...seats.values()][0].colony;
+    colony.shielded = false;
+    colony.shieldEnds = null;
+    await abandon(cookie);
+    await start(cookie, { x: 2, y: 1 });
+    expect(await myShield(cookie)).toBeNull();
+    expect((await sql`SELECT text FROM events`).some(e => String(e.text).includes("This colony isn't protected"))).toBe(true);
+
+    await abandon(cookie);
+    await new Promise(r => setTimeout(r, 450)); // the window closes
+    await start(cookie, { x: 3, y: 1 });
+    expect(await myShield(cookie)).toBeGreaterThan(Date.now() + 200);
+  });
 });

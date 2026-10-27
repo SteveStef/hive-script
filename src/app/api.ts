@@ -67,5 +67,6 @@ export const api = {
     }>('GET', '/api/leaderboard'),
   colony: () => call<ColonyStatus>('GET', '/api/colony'),
   startColony: (set: ScriptSet, map: Tile, hive?: Tile) => call<ColonyStatus>('POST', '/api/colony/start', { set, map, hive }),
+  abandonColony: () => call<{ ok: true }>('POST', '/api/colony/abandon', {}),
   deploy: (set: ScriptSet) => call<{ ok: true; tick: number }>('POST', '/api/colony/deploy', { set }),
 };

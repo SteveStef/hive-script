@@ -1,11 +1,12 @@
 // A full multiplayer world: a colony on every map without a wild nest, on the default scripts. Prints how long ticks take as the colonies grow.
 // npm run bench. The server steps every world once per GAME_TICK_MS (133 ms), so a tick must stay well under that.
-import { DEFAULT_FORAGER, DEFAULT_QUEEN, DEFAULT_SHARED } from '../src/defaultScript';
+import { DEFAULT_SHARED } from '../src/defaultScript';
+import { SURVIVOR_FORAGER, SURVIVOR_QUEEN } from '../tests/fixtures';
 import { parse } from '../src/lang/parser';
 import { toJson } from '../src/sim/view';
 import { SEASON_TICKS, SHARED_LINE_BASE, WILD_NESTS, World } from '../src/sim/world';
 
-const programs = () => ({ forager: parse(DEFAULT_FORAGER), queen: parse(DEFAULT_QUEEN), shared: parse(DEFAULT_SHARED, SHARED_LINE_BASE + 1) });
+const programs = () => ({ forager: parse(SURVIVOR_FORAGER), queen: parse(SURVIVOR_QUEEN), shared: parse(DEFAULT_SHARED, SHARED_LINE_BASE + 1) });
 const world = new World(null, 42, { maps: [5, 5], nests: WILD_NESTS, hedges: true, haltOnError: false });
 for (let y = 0; y < 5; y++) for (let x = 0; x < 5; x++) if (!world.nestOn({ x, y })) world.found(programs(), { x, y }, `p${x}${y}`);
 for (let s = 0; s < 8; s++) {

@@ -6,7 +6,7 @@ import { lessonById, lessonSet, LESSONS, type Lesson } from './tutorial/lessons'
 import { LessonPanel } from './tutorial/panel';
 import { Music } from './audio/music';
 import { DEFAULT_WASP, roleTemplate } from './defaultScript';
-import { Renderer, roleColor } from './render/renderer';
+import { insideHive, Renderer, roleColor } from './render/renderer';
 import { TILE } from './render/scenery';
 import { parseScripts, type ScriptProblem, type ScriptSet } from './sim/scripts';
 import { RemoteColony, type BeeView, type ColonyJson, type ColonyView } from './sim/view';
@@ -73,15 +73,7 @@ let mode: PlayMode = 'single';
 let roles: string[] = [];
 /** Every script file, in tab order; a lesson shows only its own tabs (and roles the player adds). */
 const files = (): ScriptFile[] =>
-  ['forager', ...roles, 'wasp', 'shared', 'queen'].filter(f =>
-    lesson ? lesson.tabs.includes(f) || roles.includes(f) : f !== 'wasp' || waspTab());
-
-/** wasp.bee only matters once the colony has a wasp nest (or wasps), so its tab waits until then. */
-function waspTab(): boolean {
-  const w = view();
-  return w.nest !== null || w.bees.some(b => b.role === 'wasp') || shownFile === 'wasp';
-}
-let waspTabShown = false;
+  ['forager', ...roles, 'wasp', 'shared', 'queen'].filter(f => !lesson || lesson.tabs.includes(f) || roles.includes(f));
 
 // single player: a world that runs here
 let seed = newSeed();
@@ -623,7 +615,9 @@ function renderWorld(): void {
   if (!overview) return;
   const w = overview;
   const held = w.maps.filter(m => m.owner).length;
-  $('world-title').textContent = colonyExists ? `World #${w.world}` : w.fallen ? 'Your colony died out' : 'Pick a map for your colony';
+  const abandoned = w.fallen === ABANDONED;
+  $('world-title').textContent = colonyExists ? `World #${w.world}` : w.fallen && !abandoned ? 'Your colony died out' : 'Pick a map for your colony';
+  $('world-abandon').hidden = !colonyExists;
   const text = $('world-text');
   text.className = w.fallen && !colonyExists ? 'world-text fallen' : 'world-text';
   text.textContent = colonyExists
@@ -631,6 +625,30 @@ function renderWorld(): void {
     : `${w.fallen ? `${w.fallen} ` : ''}World #${w.world} has ${w.maps.length - held} free maps. Every map grows its own flowers, and bees can forage across the borders, so neighbors share the meadow. Pick a free map to found your colony on the scripts in your tabs, or click a held one to watch it.`;
   renderWorldGrid(worldGrid, w, remote.map, cell => void pickMap(cell));
 }
+
+/** How the server says a colony ended when its player abandoned it. */
+const ABANDONED = 'You abandoned the colony.';
+
+/** Ends your colony on purpose, after asking: everything in it is gone and its map is free. */
+$('world-abandon').addEventListener('click', async () => {
+  const w = view();
+  const bees = w.bees.filter(b => b.role !== 'wasp').length;
+  const wasps = w.bees.length - bees;
+  const plural = (n: number, one: string) => `${n} ${one}${n === 1 ? '' : 's'}`;
+  const home = overview?.home;
+  const sure = await confirmDialog({
+    title: 'Abandon your colony?',
+    message: `Its ${plural(bees, 'bee')}${wasps ? `, ${plural(wasps, 'wasp')}` : ''} and ${w.honey} honey are gone for good${home ? `, and map [${home.x}, ${home.y}] is free for anyone` : ''}. A colony you found next keeps only what's left of your 24-hour protection.`,
+    confirmLabel: 'Abandon colony',
+    danger: true,
+  });
+  if (!sure) return;
+  try {
+    await api.abandonColony(); // the socket's "over" message reopens the world map
+  } catch (err) {
+    $('world-problem').textContent = err instanceof Error ? err.message : String(err);
+  }
+});
 
 async function pickMap(cell: MapCell): Promise<void> {
   if (colonyExists || cell.owner || cell.nest) {
@@ -697,8 +715,31 @@ interface ChatMessage {
 
 document.querySelector('.console-head')!.addEventListener('click', e => {
   const tab = (e.target as HTMLElement).closest<HTMLElement>('.console-tab');
-  if (tab) showPane(tab.dataset.pane as typeof pane);
+  if (!tab) return;
+  if (!consoleOpen()) setConsoleOpen(true); // a tab opens the folded panel
+  showPane(tab.dataset.pane as typeof pane);
 });
+
+// the log, chat and leaderboard fold away to give the editor their room; a tab opens them again
+const codeEl = document.querySelector<HTMLElement>('.code')!;
+const consoleToggle = $<HTMLButtonElement>('console-toggle');
+const logUnread = $('log-unread');
+let logMissed = 0;
+const consoleOpen = (): boolean => !codeEl.classList.contains('console-closed');
+
+function setConsoleOpen(open: boolean): void {
+  codeEl.classList.toggle('console-closed', !open);
+  consoleToggle.setAttribute('aria-expanded', String(open));
+  consoleToggle.title = open ? 'Hide the log' : 'Show the log';
+  saveSetting('console', open ? 'open' : 'closed');
+  if (!open) return;
+  logMissed = 0;
+  logUnread.hidden = true;
+  consoleEl.scrollTop = consoleEl.scrollHeight;
+  showPane(pane); // clears the chat count if chat is the open tab
+}
+consoleToggle.addEventListener('click', () => setConsoleOpen(!consoleOpen()));
+if (loadSetting('console') === 'closed') setConsoleOpen(false);
 
 function showPane(next: typeof pane): void {
   pane = next;
@@ -706,7 +747,7 @@ function showPane(next: typeof pane): void {
     if (el.classList.contains('console-tab')) el.setAttribute('aria-selected', String(el.dataset.pane === next));
     else el.hidden = el.dataset.pane !== next;
   }
-  if (next === 'chat') {
+  if (next === 'chat' && consoleOpen()) {
     unread = 0;
     chatUnread.hidden = true;
     chatList.scrollTop = chatList.scrollHeight;
@@ -743,7 +784,7 @@ function addChat(row: HTMLElement, fromOthers: boolean): void {
   chatList.append(row);
   while (chatList.childElementCount > CHAT_LIMIT) chatList.firstElementChild!.remove();
   if (atBottom || !fromOthers) chatList.scrollTop = chatList.scrollHeight;
-  if (fromOthers && pane !== 'chat') {
+  if (fromOthers && (pane !== 'chat' || !consoleOpen())) {
     chatUnread.textContent = String(++unread);
     chatUnread.hidden = false;
   }
@@ -998,10 +1039,12 @@ canvas.addEventListener('mousemove', e => {
   const nest = w.nests.find(n => n.x === hover!.x && n.y === hover!.y);
   const visitor = w.visitors.find(b => b.x === hover!.x && b.y === hover!.y);
   const hurt = (u: { health: number; maxHealth: number }) => (u.health < u.maxHealth ? `, health ${u.health} of ${u.maxHealth}` : '');
+  const home = w.bees.filter(b => insideHive(w, b, true)).length;
+  const inside = home ? `, ${home} ${home === 1 ? 'bee' : 'bees'} inside` : '';
   const what = w.hedges.includes(tileKey(hover.x, hover.y))
     ? ' · hedgerow: nothing flies through it; use a gate'
     : w.atHive(hover)
-    ? mode !== 'multi' || w.queen ? ' · the hive (click to follow the queen)' : ' · your hive'
+    ? mode !== 'multi' || w.queen ? ` · the hive${inside} (click to follow the queen)` : ` · your hive${inside}`
     : other ? ` · ${other.owner ?? 'another player'}'s hive${other.shielded ? ', a protected new colony: it can\'t be raided or stung yet' : ''}`
     : nest ? ` · ${nest.wild ? 'a wild wasp nest' : w.nest?.x === nest.x && w.nest?.y === nest.y ? 'your wasp nest' : `${nest.owner ?? 'another colony'}'s wasp nest`}${hurt(nest)}`
     : visitor ? ` · ${visitor.owner === null ? 'a wild wasp' : `${visitor.owner}'s ${visitor.role === 'wasp' ? 'wasp' : 'bee'} #${visitor.id}`}${hurt(visitor)}`
@@ -1021,6 +1064,41 @@ function setStatus(text: string): void {
 }
 
 $('card-close').addEventListener('click', () => select(null));
+
+// ---- fullscreen: the editor or the game fills the screen, with the top bar still there ----
+
+type Focus = 'code' | 'game' | null;
+let focus: Focus = null;
+const fsButtons = [...document.querySelectorAll<HTMLButtonElement>('.fs-btn')];
+
+function setFocus(next: Focus): void {
+  focus = next;
+  document.body.classList.toggle('focus-code', next === 'code');
+  document.body.classList.toggle('focus-game', next === 'game');
+  for (const b of fsButtons) {
+    const on = b.dataset.focus === next;
+    const what = b.dataset.focus === 'code' ? 'editor' : 'game';
+    b.setAttribute('aria-pressed', String(on));
+    b.title = on ? 'Leave fullscreen (Esc)' : `Fullscreen ${what} (Esc to leave)`;
+    b.setAttribute('aria-label', on ? 'Leave fullscreen' : `Fullscreen ${what}`);
+  }
+}
+
+async function toggleFocus(which: 'code' | 'game'): Promise<void> {
+  if (focus === which) {
+    setFocus(null);
+    if (document.fullscreenElement) await document.exitFullscreen().catch(() => {});
+    return;
+  }
+  setFocus(which);
+  // where the browser has no fullscreen for pages (iPhone), the side still fills the window
+  if (!document.fullscreenElement) await document.documentElement.requestFullscreen?.().catch(() => {});
+}
+
+for (const b of fsButtons) b.addEventListener('click', () => void toggleFocus(b.dataset.focus as 'code' | 'game'));
+document.addEventListener('fullscreenchange', () => {
+  if (!document.fullscreenElement && focus) setFocus(null); // left with Esc
+});
 
 /**
  * Sizes the meadow to the space its column has left after the map bar and the strip, keeping
@@ -1065,6 +1143,7 @@ canvas.addEventListener('click', e => {
   let best: BeeView | null = null;
   let bestDist = 14;
   for (const bee of w.bees) {
+    if (insideHive(w, bee, true)) continue; // out of sight in the hive: clicking the hive follows the queen
     const at = renderer.place(w, bee, 0);
     const d = Math.hypot(at.x - p.x, at.y - at.z - p.y);
     if (d < bestDist) {
@@ -1121,10 +1200,6 @@ function clock(ticks: number, msPerTick: number): string {
 }
 
 function updateHud(w: ColonyView): void {
-  if (!lesson && waspTab() !== waspTabShown) {
-    waspTabShown = !waspTabShown;
-    renderTabs(); // the nest was built (the wasp.bee tab appears), or it and every wasp are gone
-  }
   hud.honey.textContent = String(w.honey);
   hud.bees.textContent = String(w.bees.length);
   hud.eggs.textContent = String(w.eggs.length);
@@ -1197,6 +1272,11 @@ function updateHud(w: ColonyView): void {
   while (from > 0 && w.log[from - 1].seq > lastSeq) from--;
   for (let i = from; i < w.log.length; i++) consoleEl.append(logRow(w.log[i]));
   if (from < w.log.length) {
+    if (!consoleOpen()) {
+      logMissed += w.log.length - from;
+      logUnread.textContent = String(logMissed);
+      logUnread.hidden = false;
+    }
     lastSeq = w.log[w.log.length - 1].seq;
     while (consoleEl.childElementCount > CONSOLE_LIMIT) consoleEl.firstElementChild!.remove();
     consoleEl.scrollTop = consoleEl.scrollHeight;

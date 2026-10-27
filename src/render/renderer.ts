@@ -49,6 +49,17 @@ export function roleColor(roleNames: string[], role: string): string | null {
   return i > 0 ? ROLE_COLORS[(i - 1) % ROLE_COLORS.length] : null;
 }
 
+/**
+ * Whether a unit is inside its own colony's hive: home, and not on its way out. Units inside
+ * aren't drawn, so a winter's worth of resting bees doesn't pile up on one tile; the hive shows
+ * how many are in. Raiders on someone else's hive stay in sight.
+ */
+export function insideHive(world: ColonyView, bee: Unit & { owner?: string | null }, mine: boolean): boolean {
+  if (bee.action?.kind === 'move' && bee.action.moving) return false;
+  if (mine) return world.atHive(bee);
+  return bee.owner != null && world.otherHives.some(h => h.owner === bee.owner && h.x === bee.x && h.y === bee.y);
+}
+
 // A wash of color over the meadow for each season.
 const SEASON_TINT: Record<Season, string | null> = {
   spring: null,
@@ -239,9 +250,16 @@ export class Renderer {
       if (was !== undefined && was !== n) for (let i = 0; i < 3; i++) this.burst(h.x * TILE + 8, h.y * TILE + 15 - this.hives[n - 1].height + 4, n > was ? undefined : '#B8B2A4');
       this.boxes.set(key, n);
       const img = this.hives[n - 1];
-      return { img, x: h.x * TILE + 8 - (img.width >> 1), y: h.y * TILE + 15 - img.height, w: img.width, h: img.height, line: h.y * TILE + 8, shielded: h.shielded };
+      const own = !!world.hive && world.hive.x === h.x && world.hive.y === h.y;
+      const home = own
+        ? world.bees.filter(b => insideHive(world, b, true)).length
+        : world.visitors.filter(b => b.x === h.x && b.y === h.y && insideHive(world, b, false)).length;
+      return { img, x: h.x * TILE + 8 - (img.width >> 1), y: h.y * TILE + 15 - img.height, w: img.width, h: img.height, line: h.y * TILE + 8, shielded: h.shielded, home };
     });
-    const placed = [...world.bees.map(b => this.place(world, b, frac)), ...world.visitors.map(b => this.place(world, b, frac, false))];
+    const placed = [
+      ...world.bees.filter(b => !insideHive(world, b, true)).map(b => this.place(world, b, frac)),
+      ...world.visitors.filter(b => !insideHive(world, b, false)).map(b => this.place(world, b, frac, false)),
+    ];
     const sheetReady = this.sheet.complete && this.sheet.naturalWidth > 0;
     const layers = [
       ...placed.map(p => ({ y: p.y, draw: () => {
@@ -253,6 +271,7 @@ export class Renderer {
       ...stands.map(k => ({ y: k.line - 0.5, draw: () => {
         g.drawImage(k.img, k.x, k.y);
         if (k.shielded) this.drawShield(k.x + k.w / 2, k.y + k.h / 2 + 2, t);
+        if (k.home) this.drawText(String(k.home), Math.round(k.x + k.w / 2), k.y - 7); // how many are inside
       } })),
       ...world.nests.map(n => ({ y: n.y * TILE + 7.5, draw: () => {
         const sprite = n.wild ? this.nest : this.colonyNest;

@@ -38,7 +38,9 @@ npm run balance        # simulate the default scripts for two years and print ea
 npm run bench          # time a full 25-colony world, to check ticks stay well under GAME_TICK_MS
 ```
 
-Sign up, then pick **Single player**, **Multiplayer** or **Tutorial** from the menu. The
+Sign up, then pick **Single player**, **Multiplayer** or **Tutorial** from the menu. A new
+account starts with short scripts (`src/defaultScript.ts`) that gather honey and hatch bees but,
+on purpose, let the colony die out in its first autumn: keeping it alive is the player's job. The
 tutorial is 14 hands-on lessons, from your first bee to wasps and raids: each gives a goal the
 game checks as your code runs, with hints and a **Show me** solution. Lessons run their own
 starter scripts in small fixed worlds (the multiplayer ones in a two-map practice world on
@@ -62,7 +64,9 @@ sizes itself to the window (`fitGame()`), so nothing scrolls.
 
 **Multiplayer** is a world of 5×5 maps (each the size of single player's meadow) shared by
 up to 25 players. The **World map** shows who holds each map; pick a free one, then click a spot on it
-for your hive to found your colony there. Positions are world positions (map `[c, r]` covers x `20c..20c+19`,
+for your hive to found your colony there. **Abandon colony**, at the bottom of the world map, ends
+yours on purpose (everything in it is gone and the map is free); a colony founded within 24 hours of
+your first only gets what was left of that protection, so abandoning can't reset it. Positions are world positions (map `[c, r]` covers x `20c..20c+19`,
 y `12r..12r+11`). Hedgerows run along every border and around the world, with one 2-tile gate
 per border placed by the world's seed; `move_to()` routes through gates by itself (A* around
 hedges, the old L-shaped route when nothing's in the way), `distance()` counts that route,
@@ -81,8 +85,8 @@ Wasps take saving up for: the queen builds the colony's **wasp nest** with
 hatch at the nest and live there: wasps need no comb. Enemy wasps can sting a nest down. Every wasp runs **wasp.bee**, can't collect
 nectar, and can `sting()` an enemy on the next tile for 5 damage, as often as it likes. Worker bees
 can `sting()` too, but only once: 10 damage, and the bee dies when the sting lands (a miss costs
-nothing), leaving a "danger" scent its colony can smell. Bees can't sting nests. The default wasp.bee stands guard
-beside the hive. Each world also hangs three **wild wasp nests** on unclaimed maps: their
+nothing), leaving a "danger" scent its colony can smell. Bees can't sting nests. A new account's wasp.bee only waits:
+what wasps do is up to the player. Each world also hangs three **wild wasp nests** on unclaimed maps: their
 wasps sting anyone's bees nearby (never inside a hive), a map with a nest can't be claimed,
 and a nest destroyed by players' wasps hangs again on a free map next spring. Wild wasps only
 hunt on their nest's own map. A **new colony is protected for 24 real hours**: other players
@@ -108,7 +112,8 @@ A colony runs a script per role, each in its own editor tab:
 
 Press **Run** (or Ctrl+Enter). Click a bee, the hive, or a name in the bee list to follow it:
 its card shows its stats and variables, and the editor highlights the line it is running.
-Hover the meadow to see tile positions. 1× is 15 ticks per second.
+Hover the meadow to see tile positions. 1× is 15 ticks per second. The corner buttons on the editor
+and the meadow make either one fullscreen, with the top bar still there; Esc leaves.
 Calm background music starts with Run, with a track for each season; the **Music** button
 mutes it (`src/audio/music.ts`).
 

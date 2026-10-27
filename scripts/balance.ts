@@ -1,11 +1,12 @@
-// Runs the default scripts for two years on a few seeds and prints how the colony does each season.
+// Runs a colony that looks after itself (tests/fixtures.ts) for two years on a few seeds and prints how the colony does each season.
 // Use it after changing tuning numbers in src/sim/world.ts: npm run balance
-import { DEFAULT_FORAGER, DEFAULT_QUEEN, DEFAULT_SHARED } from '../src/defaultScript';
+import { DEFAULT_SHARED } from '../src/defaultScript';
+import { SURVIVOR_FORAGER, SURVIVOR_QUEEN } from '../tests/fixtures';
 import { parse } from '../src/lang/parser';
 import { SEASON_TICKS, SHARED_LINE_BASE, World } from '../src/sim/world';
 for (const seed of [1, 2, 3]) {
   const shared = parse(DEFAULT_SHARED, SHARED_LINE_BASE + 1);
-  const w = new World({ forager: parse(DEFAULT_FORAGER), queen: parse(DEFAULT_QUEEN), shared }, seed);
+  const w = new World({ forager: parse(SURVIVOR_FORAGER), queen: parse(SURVIVOR_QUEEN), shared }, seed);
   const rows: string[] = [];
   for (let s = 0; s < 8 && w.running; s++) {
     let minHoney = Infinity, maxBees = 0;

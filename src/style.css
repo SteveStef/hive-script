@@ -81,7 +81,7 @@ body {
 
 .code {
   display: grid;
-  grid-template-rows: auto minmax(0, 1fr) auto 180px;
+  grid-template-rows: auto minmax(0, 1fr) auto var(--console-h, 180px);
   min-height: 0;
   background: var(--panel);
   border: 1px solid var(--line);
@@ -96,7 +96,16 @@ body {
   border-bottom: 1px solid var(--line);
 }
 
-.tabs { display: flex; flex-wrap: wrap; align-items: flex-end; gap: 2px; padding: 6px 8px 0; border-bottom: 1px solid var(--line); }
+.tabs { display: flex; flex-wrap: wrap; align-items: flex-end; gap: 2px; padding: 6px 44px 0 8px; border-bottom: 1px solid var(--line); }
+
+/* fullscreen: one side of the page fills the screen; the top bar stays */
+.code { position: relative; }
+.fs-btn { position: absolute; z-index: 3; display: grid; place-items: center; width: 30px; height: 30px; padding: 0; }
+.code > .fs-btn { top: 6px; right: 8px; }
+.screen > .fs-btn { right: 16px; bottom: 16px; }
+.fs-btn[aria-pressed='true'] .fs-enter, .fs-btn[aria-pressed='false'] .fs-leave { display: none; }
+body.focus-code .play, body.focus-game .code { display: none; }
+body.focus-code .layout, body.focus-game .layout { grid-template-columns: minmax(0, 1fr); }
 .file-tab {
   font-family: var(--font-mono);
   font-size: 13px;
@@ -127,6 +136,13 @@ body {
 .console-tab:focus-visible { outline: 2px solid var(--honey); outline-offset: -2px; }
 .unread { margin-left: 6px; padding: 0 5px; font-size: 10px; color: var(--honey-ink); background: var(--honey); }
 .console-panes { min-height: 0; display: grid; }
+/* the log, chat and leaderboard can fold away, giving their room to the editor */
+.code.console-closed { --console-h: 0px; }
+.code.console-closed .console-panes { display: none; }
+.console-toggle { margin-left: auto; display: grid; place-items: center; width: 26px; height: 22px; padding: 0; color: var(--muted); background: none; border: 0; cursor: pointer; }
+.console-toggle:hover { color: var(--fg); }
+.console-toggle:focus-visible { outline: 2px solid var(--honey); outline-offset: -2px; }
+.console-toggle[aria-expanded='false'] svg { transform: rotate(180deg); }
 .console-panes > [hidden] { display: none; }
 .chat-pane { display: grid; grid-template-rows: minmax(0, 1fr) auto; min-height: 0; }
 .chat-list { min-height: 0; }
@@ -203,7 +219,7 @@ body {
 
 /* what's under the pointer, as a caption along the bottom of the meadow */
 .status {
-  position: absolute; left: 16px; bottom: 16px; max-width: calc(100% - 32px); z-index: 1; pointer-events: none;
+  position: absolute; left: 16px; bottom: 16px; max-width: calc(100% - 72px); z-index: 1; pointer-events: none;
   padding: 3px 8px; font-size: 12px; line-height: 1.4; color: #f6ecd2; background: rgba(27, 18, 16, 0.82);
 }
 .status[hidden] { display: none; }
@@ -292,7 +308,7 @@ body {
 @media (max-width: 900px) {
   body { height: auto; }
   .layout { grid-template-columns: minmax(0, 1fr); }
-  .code { grid-template-rows: auto 420px auto 180px; }
+  .code { grid-template-rows: auto 420px auto var(--console-h, 180px); }
   .play { order: -1; overflow: visible; }
   .play > * { width: 100%; }
   #game { width: 100%; }
@@ -379,6 +395,7 @@ body {
 .world-text { margin: 0; font-size: 12px; line-height: 1.5; color: #4a3218; }
 .world-text.fallen { color: #a8321e; }
 .world-problem { margin: 0; min-height: 1em; font-size: 12px; color: #a8321e; }
+.world-foot { display: flex; justify-content: flex-end; }
 .world-grid { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 4px; padding: 4px; background: var(--honey-ink); }
 .world-cell {
   position: relative; display: block; padding: 0; border: 0; cursor: pointer; background: #6eab36; aspect-ratio: 5 / 3; overflow: hidden;

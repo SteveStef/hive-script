@@ -1,12 +1,12 @@
 import { describe, expect, it } from 'vitest';
 import { DEFAULT_FORAGER, DEFAULT_QUEEN, DEFAULT_SHARED } from '../src/defaultScript';
+import { GUARD_WASP, SURVIVOR_FORAGER, SURVIVOR_QUEEN } from './fixtures';
 import { parse } from '../src/lang/parser';
 import {
   BEE_COST, BUILD_COST, HATCH_TICKS, LAY_TICKS, LIFESPAN_MAX, MARK_TICKS, MAX_ENERGY, MOVE_TICKS, SCENT_LIFE, SCENT_MAX,
   BLOOMS, bloom, bloomMap, COLS, hedgeLayout, HIVE_SPOT, inFootprint, ROWS, SEASON_TICKS, SHARED_LINE_BASE, START_BEES, START_COMB, tileKey, World,
   BEE_HEALTH, HATCH_TICKS as HATCH, NEST_BUILD_TICKS, NEST_COST, NEST_HEALTH, NEST_WASPS, STING_DAMAGE, STING_TICKS, WASP_CAPACITY, WASP_COST, WASP_HEALTH,
 } from '../src/sim/world';
-import { DEFAULT_WASP } from '../src/defaultScript';
 import { toJson } from '../src/sim/view';
 
 const IDLE_QUEEN = 'while True:\n    wait(1000)';
@@ -32,8 +32,8 @@ const year = SEASON_TICKS * 4;
 
 describe('world', () => {
   it('plays out the same way for the same seed', () => {
-    const a = simulate(makeWorld(DEFAULT_FORAGER, DEFAULT_QUEEN), 2500);
-    const b = simulate(makeWorld(DEFAULT_FORAGER, DEFAULT_QUEEN), 2500);
+    const a = simulate(makeWorld(SURVIVOR_FORAGER, SURVIVOR_QUEEN), 2500);
+    const b = simulate(makeWorld(SURVIVOR_FORAGER, SURVIVOR_QUEEN), 2500);
     expect(a.colony.totalHoney).toBe(b.colony.totalHoney);
     expect(a.colony.bees.map(bee => [bee.x, bee.y, bee.energy])).toEqual(b.colony.bees.map(bee => [bee.x, bee.y, bee.energy]));
   });
@@ -63,23 +63,39 @@ describe('world', () => {
   });
 });
 
-describe('the default colony', () => {
+describe('the starting scripts', () => {
+  // short on purpose: they gather and grow, but keeping the colony alive is up to the player
+  for (const seed of [1, 2, 3]) {
+    it(`gather honey and hatch bees, then die out in the first year (seed ${seed})`, () => {
+      const world = makeWorld(DEFAULT_FORAGER, DEFAULT_QUEEN, 0, seed);
+      simulate(world, SEASON_TICKS);
+      expect(world.error).toBeNull();
+      expect(world.colony.over).toBeNull();
+      expect(world.colony.totalHoney).toBeGreaterThan(30);
+      expect(world.colony.log.some(l => l.text === 'Hatched.')).toBe(true);
+      simulate(world, year - SEASON_TICKS);
+      expect(world.colony.over).not.toBeNull();
+    });
+  }
+});
+
+describe('a colony whose scripts look after it', () => {
   for (const seed of [1, 2, 3]) {
     it(`survives two years and grows past its start (seed ${seed})`, () => {
-      const world = simulate(makeWorld(DEFAULT_FORAGER, DEFAULT_QUEEN, 0, seed), year * 2);
+      const world = simulate(makeWorld(SURVIVOR_FORAGER, SURVIVOR_QUEEN, 0, seed), year * 2);
       expect(world.error).toBeNull();
       expect(world.colony.over).toBeNull();
       expect(world.colony.bees.length).toBeGreaterThan(0);
       expect(world.colony.totalHoney).toBeGreaterThan(200);
       expect(world.colony.bees.length).toBeGreaterThan(START_BEES);
-      expect(world.colony.honey).toBeGreaterThan(50); // the starting scripts never build comb: honey piles up for the player to spend
+      expect(world.colony.honey).toBeGreaterThan(50); // these scripts never build comb: honey piles up
     });
   }
 
   it('a queen who lays whenever she can starves a growing colony in its first winter', () => {
-    // the starting forager, plus building comb whenever the hive is full, so the colony can keep growing
-    const builder = DEFAULT_FORAGER.replace('        eat()  # top up before the next trip', '        eat()  # top up before the next trip\n        if space() == 0:\n            build()');
-    expect(builder).not.toBe(DEFAULT_FORAGER);
+    // the survivor forager, plus building comb whenever the hive is full, so the colony can keep growing
+    const builder = SURVIVOR_FORAGER.replace('        eat()  # top up before the next trip', '        eat()  # top up before the next trip\n        if space() == 0:\n            build()');
+    expect(builder).not.toBe(SURVIVOR_FORAGER);
     const world = simulate(makeWorld(builder, GREEDY_QUEEN), year);
     expect(world.colony.over).not.toBeNull();
     expect(world.colony.fallen.some(b => b.death?.cause === 'starved')).toBe(true);
@@ -123,7 +139,7 @@ describe('the queen, eggs and comb', () => {
 
 describe('one bee per tile', () => {
   it('never lets two bees share a tile outside the hive', () => {
-    const world = makeWorld(DEFAULT_FORAGER, DEFAULT_QUEEN);
+    const world = makeWorld(SURVIVOR_FORAGER, SURVIVOR_QUEEN);
     for (let i = 0; i < 6000; i++) {
       world.step();
       const tiles = world.colony.bees.filter(b => !world.colony.atHive(b)).map(b => `${b.x},${b.y}`);
@@ -368,12 +384,12 @@ describe('scent', () => {
 });
 
 describe('running on a server', () => {
-  const programs = (forager: string, queen = DEFAULT_QUEEN) => ({ forager: parse(forager), queen: parse(queen), shared: SHARED });
+  const programs = (forager: string, queen = SURVIVOR_QUEEN) => ({ forager: parse(forager), queen: parse(queen), shared: SHARED });
 
   it('a saved world restores with the same stores, bodies, scent and random sequence', () => {
-    const a = simulate(new World(programs(DEFAULT_FORAGER), 7), 3000);
+    const a = simulate(new World(programs(SURVIVOR_FORAGER), 7), 3000);
     const save = JSON.parse(JSON.stringify(a.save())); // through JSON, as the database stores it
-    const b = World.restore(programs(DEFAULT_FORAGER), save);
+    const b = World.restore(programs(SURVIVOR_FORAGER), save);
     expect([b.tick, b.colony.honey, b.colony.comb, b.colony.deaths, b.colony.eggs.length]).toEqual([a.tick, a.colony.honey, a.colony.comb, a.colony.deaths, a.colony.eggs.length]);
     expect(b.colony.bees.map(x => [x.id, x.role, x.x, x.y, x.energy, x.carrying, x.age])).toEqual(a.colony.bees.map(x => [x.id, x.role, x.x, x.y, x.energy, x.carrying, x.age]));
     expect(b.flowers).toEqual(a.flowers);
@@ -383,9 +399,9 @@ describe('running on a server', () => {
   });
 
   it('two restores of one save play out exactly alike, and keep the colony going', () => {
-    const save = JSON.parse(JSON.stringify(simulate(new World(programs(DEFAULT_FORAGER), 3), 2000).save()));
-    const b = simulate(World.restore(programs(DEFAULT_FORAGER), save), 2000);
-    const c = simulate(World.restore(programs(DEFAULT_FORAGER), save), 2000);
+    const save = JSON.parse(JSON.stringify(simulate(new World(programs(SURVIVOR_FORAGER), 3), 2000).save()));
+    const b = simulate(World.restore(programs(SURVIVOR_FORAGER), save), 2000);
+    const c = simulate(World.restore(programs(SURVIVOR_FORAGER), save), 2000);
     expect(b.save()).toEqual(c.save());
     expect(b.colony.totalHoney).toBeGreaterThan(save.colonies[0].totalHoney);
   });
@@ -518,11 +534,11 @@ describe('a multiplayer world of many maps', () => {
 
   it('saves and restores every colony, each with its own scripts', () => {
     const world = grid();
-    world.found(programs(DEFAULT_FORAGER, DEFAULT_QUEEN), { x: 1, y: 1 }, 'ada');
-    world.found(programs(DEFAULT_FORAGER, DEFAULT_QUEEN), { x: 2, y: 1 }, 'bo');
+    world.found(programs(SURVIVOR_FORAGER, SURVIVOR_QUEEN), { x: 1, y: 1 }, 'ada');
+    world.found(programs(SURVIVOR_FORAGER, SURVIVOR_QUEEN), { x: 2, y: 1 }, 'bo');
     simulate(world, 1500);
     const save = JSON.parse(JSON.stringify(world.save()));
-    const scripts = { ada: programs(DEFAULT_FORAGER, DEFAULT_QUEEN), bo: programs(DEFAULT_FORAGER, DEFAULT_QUEEN) };
+    const scripts = { ada: programs(SURVIVOR_FORAGER, SURVIVOR_QUEEN), bo: programs(SURVIVOR_FORAGER, SURVIVOR_QUEEN) };
     const back = World.restore(c => scripts[c.owner as 'ada' | 'bo'], save, { haltOnError: false });
     expect(back.colonies.map(c => [c.owner, c.map, c.honey, c.bees.length])).toEqual(world.colonies.map(c => [c.owner, c.map, c.honey, c.bees.length]));
     const again = World.restore(c => scripts[c.owner as 'ada' | 'bo'], save, { haltOnError: false });
@@ -636,7 +652,7 @@ describe('health, raids and wasps', () => {
     const world = grid();
     const raid = 'move_to([22, 6])\nprint("took", steal())\ngo_home()\nprint("banked", deposit())\nwhile True:\n    wait(100)';
     const robber = world.found(programs(raid), { x: 0, y: 0 }, 'robber');
-    const home = world.found({ ...programs('while True:\n    wait(100)'), wasp: parse(DEFAULT_WASP) }, { x: 1, y: 0 }, 'home');
+    const home = world.found({ ...programs('while True:\n    wait(100)'), wasp: parse(GUARD_WASP) }, { x: 1, y: 0 }, 'home');
     home.honey = 50;
     world.spawn(home, 'wasp');
     simulate(world, 400);
@@ -674,14 +690,14 @@ describe('health, raids and wasps', () => {
     const world = new World(null, 8, { maps: [5, 5], nests: 3, haltOnError: false });
     expect(world.nests).toHaveLength(3);
     expect(new Set(world.nests.map(n => `${world.mapAt(n).x},${world.mapAt(n).y}`)).size).toBe(3);
-    const c = world.found(programs(DEFAULT_FORAGER, DEFAULT_QUEEN), { x: 2, y: 2 }, 'ada');
+    const c = world.found(programs(SURVIVOR_FORAGER, SURVIVOR_QUEEN), { x: 2, y: 2 }, 'ada');
     simulate(world, 500);
     c.bees[0].health = 4;
     const save = JSON.parse(JSON.stringify(world.save()));
-    const back = World.restore(programs(DEFAULT_FORAGER, DEFAULT_QUEEN), save, { haltOnError: false });
+    const back = World.restore(programs(SURVIVOR_FORAGER, SURVIVOR_QUEEN), save, { haltOnError: false });
     expect(back.nests.map(n => [n.x, n.y, n.wasps.length])).toEqual(world.nests.map(n => [n.x, n.y, n.wasps.length]));
     expect(back.colony.bees[0].health).toBe(4);
-    const again = World.restore(programs(DEFAULT_FORAGER, DEFAULT_QUEEN), save, { haltOnError: false });
+    const again = World.restore(programs(SURVIVOR_FORAGER, SURVIVOR_QUEEN), save, { haltOnError: false });
     simulate(back, 800);
     simulate(again, 800);
     expect(back.save()).toEqual(again.save());
