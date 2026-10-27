@@ -3,6 +3,22 @@
 A 2D pixel colony game where you never steer a bee. You write a script, and every bee
 in the hive runs its own copy of it.
 
+## Hosting
+
+The live game is at **https://bee.stevestef.com**, on an OVH VPS (Ubuntu, `ssh ubuntu@40.160.90.18`).
+`docker-compose.prod.yml` runs three containers: Postgres, the game server (the `Dockerfile`:
+it builds the pages and serves them with the API), and Caddy, the only one reachable from outside.
+Cloudflare proxies the domain (SSL mode Full (strict)) and Caddy uses a Cloudflare Origin
+certificate, valid until 2041.
+
+- **Deploy:** push `main`, then `npm run deploy`. The server pulls with a read-only deploy key,
+  rebuilds and restarts; worlds are saved on the way down.
+- **Secrets stay on the server:** `~/hive-script/.env.production` (the database password) and
+  `~/hive-certs/` (the certificate and its private key).
+- **Logs:** `ssh ubuntu@40.160.90.18 'cd ~/hive-script && docker compose -f docker-compose.prod.yml --env-file .env.production logs -f app'`
+- **Server safety:** key-only SSH, ufw allowing 22, 80 and 443, automatic security updates.
+  There are no database backups yet.
+
 ## Running it
 
 The game is a website with accounts: single player runs in the browser, and multiplayer is a
