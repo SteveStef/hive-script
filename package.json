@@ -15,10 +15,12 @@
     "server:watch": "tsx watch --env-file=.env server/main.ts",
     "db:up": "docker compose up -d db",
     "db:down": "docker compose down",
-    "test:server": "vitest run tests/server"
+    "test:server": "vitest run tests/server",
+    "deploy": "bash scripts/deploy.sh"
   },
   "dependencies": {
     "@fastify/cookie": "^11.1.3",
+    "@fastify/static": "^8.3.0",
     "@fastify/websocket": "^11.3.4",
     "@node-rs/argon2": "^2.2.2",
     "fastify": "^5.12.7",

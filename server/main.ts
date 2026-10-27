@@ -5,6 +5,7 @@ import { connect, migrate } from './db';
 const url = process.env.DATABASE_URL;
 if (!url) throw new Error('DATABASE_URL is not set. Copy .env.example to .env.');
 const port = Number(process.env.PORT ?? 3001);
+const host = process.env.HOST ?? '127.0.0.1'; // 0.0.0.0 in the production container, behind Caddy
 const tickMs = Number(process.env.GAME_TICK_MS ?? 133); // 7.5 ticks a second: half single player's 1x
 
 const sql = connect(url);
@@ -12,7 +13,7 @@ await migrate(sql);
 const { app, worlds } = await buildApp(sql, { logger: true, tickMs });
 await worlds.loadAll();
 worlds.start(tickMs);
-await app.listen({ port, host: '127.0.0.1' });
+await app.listen({ port, host });
 app.log.info(`game clock: one tick every ${tickMs} ms`);
 
 // save every world before stopping, so no progress is lost on a restart

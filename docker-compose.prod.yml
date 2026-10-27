@@ -1,0 +1,51 @@
+# Production: Postgres, the game server, and Caddy in front for HTTPS. Only Caddy is reachable
+# from outside. Secrets come from .env.production on the server, which git never sees.
+#   docker compose -f docker-compose.prod.yml --env-file .env.production up -d --build
+services:
+  db:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: hive
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env.production}
+      POSTGRES_DB: hive
+    volumes:
+      - hive-db:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U hive -d hive"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+    logging: &logs
+      driver: json-file
+      options: { max-size: "10m", max-file: "3" }
+
+  app:
+    build: .
+    restart: unless-stopped
+    depends_on:
+      db: { condition: service_healthy }
+    environment:
+      DATABASE_URL: postgres://hive:${POSTGRES_PASSWORD}@db:5432/hive
+      GAME_TICK_MS: ${GAME_TICK_MS:-133}
+    stop_grace_period: 30s # time to save every world before stopping
+    logging: *logs
+
+  caddy:
+    image: caddy:2
+    restart: unless-stopped
+    depends_on: [app]
+    ports:
+      - "80:80"
+      - "443:443"
+    environment:
+      SITE: ${SITE:-bee.stevestef.com}
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - ${CERT_DIR:-./certs}:/certs:ro
+      - caddy-data:/data
+    logging: *logs
+
+volumes:
+  hive-db:
+  caddy-data:

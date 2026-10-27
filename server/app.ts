@@ -1,6 +1,8 @@
 import cookie from '@fastify/cookie';
+import fastifyStatic from '@fastify/static';
 import websocket from '@fastify/websocket';
 import Fastify from 'fastify';
+import { resolve } from 'node:path';
 import { authRoutes } from './auth';
 import { WorldServer } from './worlds';
 import type { Sql } from './db';
@@ -17,5 +19,8 @@ export async function buildApp(sql: Sql, options: { logger?: boolean; tickMs?: n
   scriptRoutes(app, sql);
   tutorialRoutes(app, sql);
   worlds.routes(app);
+  // in production the server also hands out the built pages (npm run build); in development Vite does
+  const pages = process.env.STATIC_DIR;
+  if (pages) await app.register(fastifyStatic, { root: resolve(pages), index: 'index.html' });
   return { app, worlds };
 }

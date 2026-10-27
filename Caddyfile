@@ -1,0 +1,7 @@
+# HTTPS for the game. Cloudflare sits in front (proxied, SSL mode Full (strict)) and trusts the
+# Cloudflare Origin certificate in /certs; everything, WebSockets included, goes to the game server.
+{$SITE} {
+	tls /certs/origin.pem /certs/origin.key
+	encode zstd gzip
+	reverse_proxy app:3001
+}
