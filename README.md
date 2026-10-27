@@ -11,8 +11,10 @@ it builds the pages and serves them with the API), and Caddy, the only one reach
 Cloudflare proxies the domain (SSL mode Full (strict)) and Caddy uses a Cloudflare Origin
 certificate, valid until 2041.
 
-- **Deploy:** push `main`, then `npm run deploy`. The server pulls with a read-only deploy key,
-  rebuilds and restarts; worlds are saved on the way down.
+- **Deploy:** push to `main`. GitHub Actions (`.github/workflows/deploy.yml`) runs the type check,
+  tests and build, and only if they pass logs into the server with a key that can run nothing but
+  `scripts/server-deploy.sh`: pull (a read-only deploy key), rebuild, restart, check it answers.
+  Worlds are saved on the way down. `npm run deploy` does the same by hand, without a push.
 - **Secrets stay on the server:** `~/hive-script/.env.production` (the database password) and
   `~/hive-certs/` (the certificate and its private key).
 - **Logs:** `ssh ubuntu@40.160.90.18 'cd ~/hive-script && docker compose -f docker-compose.prod.yml --env-file .env.production logs -f app'`

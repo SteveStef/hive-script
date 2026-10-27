@@ -1,0 +1,64 @@
+# On every push to main: type check, test and build, then (only if all of that passes) deploy to
+# the server. The deploy key in DEPLOY_SSH_KEY can only run scripts/server-deploy.sh there.
+name: Test and deploy
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch: # a "Run workflow" button, to redeploy without a push
+
+concurrency:
+  group: deploy
+  cancel-in-progress: false
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: hive
+          POSTGRES_PASSWORD: hive
+          POSTGRES_DB: hive_test
+        ports: ["5433:5432"]
+        options: >-
+          --health-cmd "pg_isready -U hive -d hive_test"
+          --health-interval 5s --health-timeout 3s --health-retries 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+      - run: npm ci
+      - run: npm run typecheck
+      - run: npm test
+      - run: npm run test:server
+        env:
+          TEST_DATABASE_URL: postgres://hive:hive@localhost:5433/hive_test
+      - run: npm run build
+
+  deploy:
+    needs: test
+    runs-on: ubuntu-latest
+    steps:
+      - name: Deploy to the server
+        env:
+          DEPLOY_SSH_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
+        run: |
+          install -m 700 -d ~/.ssh
+          printf '%s\n' "$DEPLOY_SSH_KEY" > ~/.ssh/deploy
+          chmod 600 ~/.ssh/deploy
+          # the server's own key, so nothing else can pose as it
+          echo "40.160.90.18 ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIChG8fQzKT3cJYFbQ5fxG/C98fM80WNs1nIlwd8cdxAu" > ~/.ssh/known_hosts
+          ssh -T -i ~/.ssh/deploy -o IdentitiesOnly=yes ubuntu@40.160.90.18
+      - name: Check the live site
+        run: |
+          for _ in $(seq 1 20); do
+            code=$(curl -s -o /dev/null -w '%{http_code}' https://bee.stevestef.com/api/me || true)
+            [ "$code" = 401 ] && echo "bee.stevestef.com is up" && exit 0
+            sleep 3
+          done
+          echo "bee.stevestef.com didn't answer" >&2
+          exit 1
