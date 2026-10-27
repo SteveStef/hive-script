@@ -4,8 +4,8 @@ import { disc, INK, outlined, paint, sprite } from './pixels';
 
 export const TILE = 16;
 
-/** Grass, tufts, leafy ground under flowers, worn dirt at the hive and a faint tile grid. */
-export function makeGround(flowers: Tile[], hive: Tile): HTMLCanvasElement {
+/** One map's grass, tufts, leafy ground under flowers, worn dirt at its hive and a faint tile grid; positions are within the map. */
+export function makeGround(flowers: Tile[], hives: Tile[]): HTMLCanvasElement {
   const W = COLS * TILE;
   const H = ROWS * TILE;
   return sprite(W, H, g => {
@@ -14,7 +14,7 @@ export function makeGround(flowers: Tile[], hive: Tile): HTMLCanvasElement {
     g.fillRect(0, 0, W, H);
     for (let i = 0; i < 9; i++) disc(g, rnd() * W, rnd() * H, 14 + rnd() * 22, 7 + rnd() * 9, '#76B33C', true);
     for (const f of flowers) disc(g, f.x * TILE + 8, f.y * TILE + 9, 10, 8, '#5F9C2F', true);
-    disc(g, hive.x * TILE + 8, hive.y * TILE + 15, 13, 5, '#A7834F', true);
+    for (const hive of hives) disc(g, hive.x * TILE + 8, hive.y * TILE + 15, 13, 5, '#A7834F', true);
 
     const tufts = [['d...d', 'd.d.d', '.ddd.'], ['d.d', 'ddd'], ['..d..', 'd.d.d', 'ddddd']];
     for (let i = 0; i < 60; i++) {
@@ -116,3 +116,38 @@ export const BUDS = Object.fromEntries(
 ) as Record<FlowerKind, HTMLCanvasElement[]>;
 /** Where the tiny flowers sit inside a flower tile. */
 export const FLOWER_SPOTS: [number, number][] = [[3, 3], [10, 2], [7, 7], [12, 10], [3, 11], [8, 13]];
+
+// paper colors for a nest: dark band, light band, mid band, the lit side, the shaded side
+const WILD_PAPER = ['#8E887C', '#B8B2A4', '#A39D90', '#CFC9BB', '#706B61'];
+// a colony's own nest, in wasp yellow and black, so it never reads as a wild one
+const COLONY_PAPER = ['#2B2420', '#F2C230', '#E0A91E', '#FFE27A', '#B7841A'];
+
+/** A wasp nest: a paper ball in bands, with its door at the bottom, lit from the left. Grey when wild. */
+export function makeNest(colony = false): HTMLCanvasElement {
+  const [dark, light, mid, lit, shade] = colony ? COLONY_PAPER : WILD_PAPER;
+  const W = 15;
+  const H = 18;
+  return outlined(
+    sprite(W, H, g => {
+      const cx = 7;
+      const cy = 8.5;
+      for (let y = 0; y < H; y++) {
+        for (let x = 0; x < W; x++) {
+          const u = (x - cx) / 7.2;
+          const v = (y - cy) / 8.8;
+          if (u * u + v * v > 1) continue;
+          const band = Math.floor(y + Math.sin(x * 0.9) * 0.8) % 3;
+          let col = band === 0 ? dark : band === 1 ? light : mid;
+          if (u < -0.45 && band !== 0) col = lit;
+          if (u > 0.5) col = band === 0 ? dark : shade;
+          g.fillStyle = col;
+          g.fillRect(x, y, 1, 1);
+        }
+      }
+      g.fillStyle = '#1A140F'; // the door
+      g.fillRect(cx - 1, H - 4, 3, 2);
+      g.fillRect(cx, H - 2, 1, 1);
+    }),
+    INK,
+  );
+}

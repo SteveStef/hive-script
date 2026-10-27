@@ -9,9 +9,9 @@ for (const seed of [1, 2, 3]) {
   const rows: string[] = [];
   for (let s = 0; s < 8 && w.running; s++) {
     let minHoney = Infinity, maxBees = 0;
-    for (let i = 0; i < SEASON_TICKS && w.running; i++) { w.step(); minHoney = Math.min(minHoney, w.honey); maxBees = Math.max(maxBees, w.bees.length); }
-    const starved = w.fallen.filter(b => b.death?.cause === 'starved').length;
-    rows.push(`${w.season.padEnd(6)} y${w.year} bees=${w.bees.length} (max ${maxBees}) eggs=${w.eggs.length} honey=${w.honey} (min ${minHoney}) comb=${w.comb} deaths=${w.deaths} starved=${starved}`);
+    for (let i = 0; i < SEASON_TICKS && w.running; i++) { w.step(); minHoney = Math.min(minHoney, w.colony.honey); maxBees = Math.max(maxBees, w.colony.bees.length); }
+    const starved = w.colony.fallen.filter(b => b.death?.cause === 'starved').length;
+    rows.push(`${w.season.padEnd(6)} y${w.year} bees=${w.colony.bees.length} (max ${maxBees}) eggs=${w.colony.eggs.length} honey=${w.colony.honey} (min ${minHoney}) comb=${w.colony.comb} deaths=${w.colony.deaths} starved=${starved}`);
   }
-  console.log(`seed ${seed}${w.over ? ' OVER: ' + w.over : ''}${w.error ? ' ERROR ' + JSON.stringify(w.error) : ''}\n  ` + rows.join('\n  '));
+  console.log(`seed ${seed}${w.colony.over ? ' OVER: ' + w.colony.over : ''}${w.error ? ' ERROR ' + JSON.stringify(w.error) : ''}\n  ` + rows.join('\n  '));
 }

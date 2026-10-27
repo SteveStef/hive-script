@@ -26,8 +26,9 @@ while True:
             # flowers out of sight that another bee marked: follow the scent
             move_to(s)
         else:
-            # nothing to see or smell: explore somewhere new
-            spot = [random(20), random(12)]
+            # nothing to see or smell: explore somewhere new on our map (20 x 12 tiles)
+            m = my_map()
+            spot = [m[0] * 20 + random(20), m[1] * 12 + random(12)]
             if can_reach(spot):
                 move_to(spot)
             else:
@@ -49,6 +50,26 @@ while True:
         lay()
     else:
         wait(60)
+`;
+
+export const DEFAULT_WASP = `# wasp.bee: every wasp runs its own copy. Wasps hatch at the colony's wasp nest: the queen builds
+# one with build_nest(position) for 150 honey, then lays wasps with lay("wasp"), for 30 honey each.
+# Wasps can't collect nectar. They sting(), guard the hive and steal() from other hives.
+# This one stands guard beside the hive. A raider has to land on the hive to steal(),
+# which takes 10 ticks: time for two stings, enough to finish a bee.
+while True:
+    post = [hive_pos()[0] + 1, hive_pos()[1]]  # the tile just east of the hive
+    if energy() < 40 or health() <= max_health() / 2:
+        go_home()
+        eat()  # eating heals stings, too
+    elif distance(get_pos(), post) > 0:
+        move_to(post)
+    else:
+        enemies = enemies_near()
+        if enemies and distance(get_pos(), enemies[0]) == 1:
+            sting(enemies[0])
+        else:
+            wait(1)
 `;
 
 export const DEFAULT_SHARED = `# shared.bee: functions here work in every worker role's script (not the queen's).

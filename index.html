@@ -4,6 +4,7 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Hive Script</title>
+    <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Cpath d='M4 1h8l4 7-4 7H4L0 8z' fill='%2324150c'/%3E%3Cpath d='M5 3h6l3 5-3 5H5L2 8z' fill='%23f5c127'/%3E%3Cpath d='M5 6h6M4 10h8' stroke='%2324150c' stroke-width='1.5'/%3E%3C/svg%3E" />
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;600&family=Pixelify+Sans:wght@500;700&display=swap" />
@@ -12,28 +13,79 @@
     <header class="top">
       <h1>Hive Script</h1>
       <div class="controls">
-        <button class="pbtn" id="run" type="button" title="Run the script on every bee (Ctrl+Enter)">Run</button>
-        <button class="pbtn" id="pause" type="button" disabled>Pause</button>
-        <button class="pbtn" id="step" type="button" title="Advance one tick">Step</button>
-        <span class="sep"></span>
-        <button class="pbtn" type="button" data-speed="1" aria-pressed="true">1&times;</button>
-        <button class="pbtn" type="button" data-speed="4" aria-pressed="false">4&times;</button>
-        <button class="pbtn" type="button" data-speed="16" aria-pressed="false">16&times;</button>
+        <span class="mode-group" id="single-controls">
+          <button class="pbtn" id="run" type="button" title="Run the script on every bee (Ctrl+Enter)">Run</button>
+          <button class="pbtn" id="pause" type="button" disabled>Pause</button>
+          <button class="pbtn" id="step" type="button" title="Advance one tick">Step</button>
+          <span class="sep"></span>
+          <button class="pbtn" type="button" data-speed="1" aria-pressed="true">1&times;</button>
+          <button class="pbtn" type="button" data-speed="4" aria-pressed="false">4&times;</button>
+          <button class="pbtn" type="button" data-speed="16" aria-pressed="false">16&times;</button>
+          <button class="pbtn" id="lessons" type="button" title="Back to the list of lessons" hidden>Lessons</button>
+        </span>
+        <span class="mode-group" id="multi-controls" hidden>
+          <span class="live" id="live" aria-live="polite">Connecting…</span>
+          <button class="pbtn" id="deploy" type="button" title="Send every script to your colony; every bee starts the new code (Ctrl+Enter)">Deploy</button>
+        </span>
         <span class="sep"></span>
         <button class="pbtn" id="music" type="button" aria-pressed="true" title="Calm background music, a track for each season">Music</button>
         <a class="pbtn" href="./docs.html" target="_blank" rel="noopener" title="Every function, with animated examples">Docs</a>
+        <button class="pbtn" id="menu" type="button" title="Back to the main menu">Menu</button>
       </div>
     </header>
     <main class="layout">
       <section class="code">
         <div class="tabs" role="tablist" id="tabs"></div>
         <div id="editor"></div>
-        <div class="console-head">Log</div>
-        <div id="console" class="console" aria-live="polite"></div>
+        <div class="console-head" role="tablist" aria-label="Log, chat and leaderboard">
+          <button class="console-tab" type="button" role="tab" data-pane="log" aria-selected="true">Log</button>
+          <button class="console-tab" type="button" role="tab" data-pane="chat" aria-selected="false" hidden>Chat<span class="unread" id="chat-unread" hidden></span></button>
+          <button class="console-tab" type="button" role="tab" data-pane="leaders" aria-selected="false" hidden>Leaders</button>
+        </div>
+        <div class="console-panes">
+          <div id="console" class="console" data-pane="log" aria-live="polite"></div>
+          <div class="chat-pane" data-pane="chat" hidden>
+            <div class="console chat-list" id="chat-list" aria-live="polite"></div>
+            <form class="chat-form" id="chat-form" autocomplete="off">
+              <input id="chat-input" type="text" maxlength="280" placeholder="Say something to everyone in your world" aria-label="Chat message" />
+              <button class="pbtn" type="submit">Send</button>
+            </form>
+          </div>
+          <div class="console leaders" id="leaders" data-pane="leaders" hidden></div>
+        </div>
       </section>
       <section class="play">
-        <div class="screen"><canvas id="game"></canvas></div>
-        <div class="hud">
+        <nav class="map-bar" id="map-bar" aria-label="Maps of the world" hidden>
+          <button class="pbtn" id="world-map" type="button" title="Every map of the world: who holds it, and how they're doing">World map</button>
+          <span class="map-arrows">
+            <button class="pbtn arrow" type="button" data-go="west" title="Watch the map to the west">&#9664;</button>
+            <button class="pbtn arrow" type="button" data-go="north" title="Watch the map to the north">&#9650;</button>
+            <button class="pbtn arrow" type="button" data-go="south" title="Watch the map to the south">&#9660;</button>
+            <button class="pbtn arrow" type="button" data-go="east" title="Watch the map to the east">&#9654;</button>
+          </span>
+          <span class="map-label" id="map-label" aria-live="polite"></span>
+          <button class="pbtn" id="map-home" type="button" title="Back to your colony's map">Home</button>
+        </nav>
+        <div class="screen">
+          <canvas id="game"></canvas>
+          <div class="world-panel" id="world-panel" hidden>
+            <div class="world-card" role="dialog" aria-labelledby="world-title">
+              <header class="world-head">
+                <b id="world-title">World</b>
+                <button class="world-close" id="world-close" type="button" title="Close the world map">&times;</button>
+              </header>
+              <p class="world-text" id="world-text"></p>
+              <div class="world-grid" id="world-grid"></div>
+              <p class="world-problem" id="world-problem" aria-live="polite"></p>
+            </div>
+          </div>
+        </div>
+        <div class="lesson-switch" id="lesson-switch" role="tablist" aria-label="Lesson or colony" hidden>
+          <button class="console-tab" type="button" role="tab" data-show="lesson" aria-selected="true">Lesson</button>
+          <button class="console-tab" type="button" role="tab" data-show="colony" aria-selected="false">Colony</button>
+        </div>
+        <section class="lesson-panel" id="lesson-panel" aria-live="polite" hidden></section>
+        <div class="hud" id="hud">
           <div class="colony">
             <div class="season">
               <b id="season-name">Spring</b>
@@ -57,6 +109,83 @@
         </div>
       </section>
     </main>
+    <div class="title-page" id="screen-layer" hidden>
+      <canvas class="title-meadow" id="title-meadow" aria-hidden="true"></canvas>
+      <div class="title-wrap">
+        <header class="title-hero">
+          <h1 class="title-logo"><span class="title-bee" aria-hidden="true"></span>Hive Script</h1>
+          <p class="title-tag">Write the code. Your bees do the work.</p>
+        </header>
+
+        <section class="title-screen auth-screen" id="auth-screen" hidden>
+          <figure class="code-sign" aria-label="An example script">
+            <figcaption>forager.bee</figcaption>
+<pre><span class="k">while</span> True:
+    f = <span class="a">nearest_flower</span>()
+    <span class="k">if</span> f:
+        <span class="a">move_to</span>(f)
+        <span class="a">collect</span>()
+        <span class="a">mark</span>(<span class="s">"food"</span>)  <span class="c"># tell the others</span>
+    <span class="a">go_home</span>()
+    <span class="a">deposit</span>()</pre>
+          </figure>
+          <form class="wax-panel" id="auth-form" novalidate>
+            <h2>Welcome to the hive</h2>
+            <p class="screen-lede">Sign in to keep your scripts and run a colony that never sleeps.</p>
+            <label class="screen-field" for="auth-username">Username
+              <input id="auth-username" name="username" type="text" autocomplete="username" spellcheck="false" maxlength="20" required />
+            </label>
+            <label class="screen-field" for="auth-password">Password
+              <input id="auth-password" name="password" type="password" autocomplete="current-password" required />
+            </label>
+            <p class="screen-problem" id="auth-problem" aria-live="polite"></p>
+            <div class="screen-buttons">
+              <button class="pbtn big" type="submit" id="auth-login" value="login">Log in</button>
+              <button class="pbtn quiet" type="submit" id="auth-signup" value="signup">Create account</button>
+            </div>
+            <p class="screen-note">New here? Pick a username (3 to 20 lowercase letters, numbers or _) and a password of at least 8 characters, then press Create account.</p>
+          </form>
+        </section>
+
+        <section class="title-screen menu-screen" id="menu-screen" hidden>
+          <p class="who-pill"><span class="who-dot" aria-hidden="true"></span><span id="menu-who"></span></p>
+          <div class="mode-cards">
+            <button class="mode-card" type="button" id="menu-single">
+              <img class="mode-art" id="art-single" alt="" />
+              <b>Single player</b>
+              <small>Your own meadow. Run, pause, speed up and experiment.</small>
+              <span class="mode-go">Play</span>
+            </button>
+            <button class="mode-card" type="button" id="menu-multi">
+              <img class="mode-art" id="art-multi" alt="" />
+              <b>Multiplayer</b>
+              <small>Claim a map in a shared 5×5 world. Your bees work day and night.</small>
+              <span class="mode-go">Play</span>
+            </button>
+            <button class="mode-card" type="button" id="menu-tutorial">
+              <img class="mode-art" id="art-tutorial" alt="" />
+              <b>Tutorial</b>
+              <small>Hands-on lessons, from your first bee to wasps and raids.</small>
+              <span class="mode-go">Learn</span>
+            </button>
+          </div>
+          <nav class="menu-foot">
+            <a class="pbtn quiet" href="./docs.html" target="_blank" rel="noopener">Docs</a>
+            <button class="pbtn quiet" type="button" id="menu-logout">Log out</button>
+          </nav>
+        </section>
+
+        <section class="title-screen tutorial-screen" id="tutorial-screen" hidden>
+          <div class="wax-panel lesson-list">
+            <h2>Tutorial</h2>
+            <p class="screen-lede" id="lesson-progress"></p>
+            <div class="lesson-groups" id="lesson-groups"></div>
+            <button class="pbtn quiet" type="button" id="tutorial-back">Back to the menu</button>
+          </div>
+        </section>
+      </div>
+      <p class="title-hint">Click the meadow to send a bee.</p>
+    </div>
     <script type="module" src="/src/main.ts"></script>
   </body>
 </html>

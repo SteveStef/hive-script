@@ -70,13 +70,15 @@ class Clip {
   }
 
   private get follower() {
-    return this.demo.follow === 'queen' ? this.world.queen : this.world.bees[0];
+    const c = this.world.colony;
+    if (this.demo.follow === 'queen') return c.queen;
+    return this.demo.follow === 'wasp' ? (c.bees.find(b => b.role === 'wasp') ?? c.fallen.find(b => b.role === 'wasp')) : (c.bees[0] ?? c.fallen[0]);
   }
 
   /** The followed script has run to its end and nothing is left to watch. */
   private get done(): boolean {
     const f = this.follower;
-    return !!f && f.runner.finished && !f.action && this.world.eggs.length === 0;
+    return !!f && f.runner.finished && !f.action && this.world.colony.eggs.length === 0;
   }
 
   advance(ms: number): void {
@@ -95,7 +97,7 @@ class Clip {
   }
 
   draw(): void {
-    const w = this.world;
+    const w = this.world.colony;
     const bee = w.bees[0];
     this.renderer.draw(w, 0, this.demo.sight && bee ? bee.id : null, null);
     w.events = [];
@@ -109,7 +111,8 @@ class Clip {
       this.code.querySelector(`.ln[data-line="${line}"]`)?.classList.add('on');
       this.line = line;
     }
-    const who = this.demo.follow === 'queen' ? 'queen' : 1;
+    const f = this.follower;
+    const who = this.demo.follow === 'queen' ? 'queen' : f && 'id' in f ? f.id : 1;
     const output = w.log.filter(l => l.who === who && !l.tone).slice(-3).map(l => l.text).join('\n');
     if (output !== this.shownOutput) this.output.textContent = this.shownOutput = output;
   }
@@ -126,7 +129,7 @@ function signature(name: string): string {
 
 function scriptTag(name: string): string {
   const only = API_DOCS.find(d => d.name === name)?.only;
-  return only === 'queen' ? 'queen.bee only' : only === 'worker' ? 'worker scripts only' : 'every script';
+  return only === 'queen' ? 'queen.bee only' : only === 'wasp' ? 'wasp.bee only' : only === 'worker' ? 'worker scripts only' : 'every script';
 }
 
 function card(name: string, entry: DocEntry): HTMLElement {
@@ -162,9 +165,9 @@ function card(name: string, entry: DocEntry): HTMLElement {
     figure.append(canvas, out, hint);
     const script = document.createElement('div');
     script.className = 'script';
-    const file = entry.demo.follow === 'queen' ? 'queen.bee' : 'forager.bee';
+    const file = entry.demo.follow === 'queen' ? 'queen.bee' : entry.demo.follow === 'wasp' ? 'wasp.bee' : 'forager.bee';
     script.innerHTML = `<div class="script-head">Example ${file}</div>`;
-    const code = codeBlock(entry.demo.follow === 'queen' ? entry.demo.queen! : entry.demo.forager!);
+    const code = codeBlock(entry.demo.follow === 'queen' ? entry.demo.queen! : entry.demo.follow === 'wasp' ? entry.demo.wasp! : entry.demo.forager!);
     script.append(code);
     demo.append(figure, script);
     el.append(demo);

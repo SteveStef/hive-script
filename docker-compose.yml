@@ -1,0 +1,15 @@
+# Local Postgres for Hive Script Online: npm run db:up
+services:
+  db:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: hive
+      POSTGRES_PASSWORD: hive
+      POSTGRES_DB: hive
+    ports:
+      - "5433:5432" # 5433 on this machine, so it can't clash with another Postgres
+    volumes:
+      - hive-db:/var/lib/postgresql/data
+      - ./server/db-init.sql:/docker-entrypoint-initdb.d/db-init.sql:ro
+volumes:
+  hive-db:

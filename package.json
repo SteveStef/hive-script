@@ -4,17 +4,31 @@
   "version": "0.1.0",
   "type": "module",
   "scripts": {
-    "dev": "vite",
+    "dev": "concurrently -k -n web,server -c yellow,green \"vite\" \"npm:server:watch\"",
     "build": "tsc --noEmit && vite build",
     "preview": "vite preview",
-    "test": "vitest run",
+    "test": "vitest run --exclude 'tests/server/**'",
     "typecheck": "tsc --noEmit",
-    "balance": "vite-node scripts/balance.ts"
+    "balance": "vite-node scripts/balance.ts",
+    "bench": "vite-node scripts/bench-world.ts",
+    "server": "tsx --env-file=.env server/main.ts",
+    "server:watch": "tsx watch --env-file=.env server/main.ts",
+    "db:up": "docker compose up -d db",
+    "db:down": "docker compose down",
+    "test:server": "vitest run tests/server"
   },
   "dependencies": {
-    "monaco-editor": "^0.52.0"
+    "@fastify/cookie": "^11.1.3",
+    "@fastify/websocket": "^11.3.4",
+    "@node-rs/argon2": "^2.2.2",
+    "fastify": "^5.12.7",
+    "monaco-editor": "^0.52.0",
+    "postgres": "^3.4.9"
   },
   "devDependencies": {
+    "@types/node": "^20.19.43",
+    "concurrently": "^9.2.5",
+    "tsx": "^4.23.15",
     "typescript": "~5.6.3",
     "vite": "^5.4.10",
     "vitest": "^2.1.4"

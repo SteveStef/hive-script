@@ -1,23 +1,30 @@
 import './style.css';
+import { api, ApiError, type Mode } from './app/api';
+import { closeScreens, lessonList, mainMenu, signIn } from './app/screens';
+import { renderWorldGrid, type MapCell, type WorldOverview } from './app/worldMap';
+import { lessonById, lessonSet, LESSONS, type Lesson } from './tutorial/lessons';
+import { LessonPanel } from './tutorial/panel';
 import { Music } from './audio/music';
-import { DEFAULT_FORAGER, DEFAULT_QUEEN, DEFAULT_SHARED, roleTemplate } from './defaultScript';
-import { ScriptError } from './lang/errors';
-import { parse } from './lang/parser';
+import { DEFAULT_WASP, roleTemplate } from './defaultScript';
 import { Renderer, roleColor } from './render/renderer';
 import { TILE } from './render/scenery';
-import {
-  locate, MAX_ENERGY, MAX_ROLES, RESERVED_NAMES, ROLE_NAME, SEASON_TICKS, SHARED_LINE_BASE, World,
-  type Bee, type LogLine, type Programs, type ScriptFile, type Tile,
-} from './sim/world';
+import { parseScripts, type ScriptProblem, type ScriptSet } from './sim/scripts';
+import { RemoteColony, type BeeView, type ColonyJson, type ColonyView } from './sim/view';
+import { COLS, locate, MAX_ENERGY, MAX_ROLES, RESERVED_NAMES, ROLE_NAME, ROWS, SEASON_TICKS, World, type LogLine, type ScriptFile, type Tile } from './sim/world';
 import { beeCard, beeStatus, queenCard, queenStatus } from './ui/beeCard';
 import { confirmDialog, promptDialog } from './ui/dialog';
 import { createEditor } from './ui/editor';
 
-const TICKS_PER_SECOND = 15; // at 1x; 4x and 16x multiply this
+const TICKS_PER_SECOND = 15; // single player at 1x; 4x and 16x multiply this
 const CONSOLE_LIMIT = 300;
-const DEFAULTS: Record<string, string> = { forager: DEFAULT_FORAGER, queen: DEFAULT_QUEEN, shared: DEFAULT_SHARED };
+const SAVE_DELAY = 600; // ms after the last keystroke before a script is saved to the account
+const RECONNECT_MS = 2000;
+const WORLD_REFRESH_MS = 3000; // how often an open world map asks for fresh numbers
+const LEADERS_REFRESH_MS = 5000; // ...and the leaderboard, while it's showing
+const CHAT_LIMIT = 200; // chat rows kept on screen
 const TAB_NOTES: Record<string, string> = {
   forager: 'every forager runs this; plain lay() lays foragers',
+  wasp: 'every wasp runs this; wasps hatch at the colony\'s nest: build_nest(), then lay("wasp")',
   shared: 'functions every worker role can use',
   queen: 'the queen runs this in the hive',
 };
@@ -30,30 +37,761 @@ const consoleEl = $('console');
 const runBtn = $<HTMLButtonElement>('run');
 const pauseBtn = $<HTMLButtonElement>('pause');
 const stepBtn = $<HTMLButtonElement>('step');
+const deployBtn = $<HTMLButtonElement>('deploy');
+const liveEl = $('live');
 const musicBtn = $<HTMLButtonElement>('music');
 const chipsEl = $('bee-chips');
 const cardEl = $('bee-card');
+const tabsEl = $('tabs');
+const roleCountsEl = $('role-counts');
+const mapBar = $('map-bar');
+const mapLabel = $('map-label');
+const worldPanel = $('world-panel');
+const worldGrid = $('world-grid');
+const chatList = $('chat-list');
+const chatInput = $<HTMLInputElement>('chat-input');
+const chatUnread = $('chat-unread');
+const leadersEl = $('leaders');
 const hud = {
   honey: $('s-honey'), bees: $('s-bees'), eggs: $('s-eggs'), comb: $('s-comb'), deaths: $('s-deaths'), tick: $('s-tick'),
   season: $('season-name'), seasonBar: $('season-bar'), seasonLeft: $('season-left'), status: $('status'),
 };
 
-const tabsEl = $('tabs');
-const roleCountsEl = $('role-counts');
+// ---- state ----
 
+/** Single player and the tutorial run a world here; multiplayer watches one on the server. */
+type PlayMode = Mode | 'tutorial';
+
+let username: string | null = null;
+let mode: PlayMode = 'single';
 // custom roles, in the order they were made; forager is built in
-let roles = loadRoles();
-/** Every script file, in tab order. */
-const files = (): ScriptFile[] => ['forager', ...roles, 'shared', 'queen'];
+let roles: string[] = [];
+/** Every script file, in tab order; a lesson shows only its own tabs (and roles the player adds). */
+const files = (): ScriptFile[] =>
+  ['forager', ...roles, 'wasp', 'shared', 'queen'].filter(f => !lesson || lesson.tabs.includes(f) || roles.includes(f));
 
-const editor = createEditor($('editor'), Object.fromEntries(files().map(f => [f, loadCode(f)])));
+// single player: a world that runs here
+let seed = newSeed();
+let local = new World(null, seed);
+let running = false;
+let speed = 1;
+let acc = 0;
+// multiplayer: the colony that runs on the server, as last seen
+let remote = new RemoteColony();
+let socket: WebSocket | null = null;
+let colonyExists = false;
+let tickMs = 133;
+let lastStateAt = 0;
+// the player's world as the world map last showed it, and the map being watched
+let overview: WorldOverview | null = null;
+let worldTimer = 0;
+let pane: 'log' | 'chat' | 'leaders' = 'log';
+let unread = 0;
+let leadersTimer = 0;
+// the tutorial: the open lesson, which of its goals are met, and the player's code while "Show me" shows the solution
+let lesson: Lesson | null = null;
+let met: boolean[] = [];
+let doneLessons = new Set<string>();
+let savedAttempt: ScriptSet | null = null;
+const lessonPanelEl = $('lesson-panel');
+const lessonSwitch = $('lesson-switch');
+const hudEl = $('hud');
+
+/** The colony on screen: the local world's in single player and the tutorial, the server's in multiplayer. */
+const view = (): ColonyView => (mode === 'multi' ? remote : local.colony);
+
+const renderer = new Renderer(canvas);
+let last = 0;
+let selected: Selection = null;
+let hover: Tile | null = null;
+let lastSeq = -1; // the newest log line on screen
+// the scripts the colony runs (as of Run or Deploy), for the cards' line text
+let sourceLines: Record<ScriptFile, string[]> = {};
+let shownChips = '';
+let shownCard = '';
+const music = new Music(loadSetting('music') === 'off');
+musicBtn.setAttribute('aria-pressed', String(!music.isMuted));
+
+const editor = createEditor($('editor'), { forager: '', wasp: '', shared: '', queen: '' });
 let shownFile: ScriptFile = 'forager';
-editor.onChange(saveCode);
-editor.onRun(start);
+editor.onChange(queueSave);
+editor.onRun(() => (mode === 'multi' ? void deploy() : start()));
 editor.onShow(file => {
   shownFile = file;
   renderTabs();
 });
+
+// ---- signing in, the menu, and moving between modes ----
+
+async function boot(): Promise<void> {
+  username = await api.me().catch(() => null);
+  await menu();
+}
+
+async function menu(): Promise<void> {
+  if (!username) username = await signIn();
+  const choice = await mainMenu(username);
+  if (choice === 'logout') {
+    await api.logout().catch(() => {});
+    username = null;
+    return menu();
+  }
+  if (choice === 'tutorial') return tutorialMenu();
+  closeScreens();
+  try {
+    await enter(choice);
+  } catch (e) {
+    if (e instanceof ApiError && e.status === 401) username = null;
+    note(`Couldn't open ${choice === 'single' ? 'single player' : 'multiplayer'}: ${e instanceof Error ? e.message : e}`, 'error');
+    return menu();
+  }
+}
+
+/** Shows the controls and panels of a mode. */
+function setMode(next: PlayMode): void {
+  mode = next;
+  if (mode !== 'tutorial') lesson = null;
+  $('single-controls').hidden = mode === 'multi';
+  $('lessons').hidden = mode !== 'tutorial';
+  $('multi-controls').hidden = mode !== 'multi';
+  mapBar.hidden = mode !== 'multi';
+  $('world-map').hidden = mode !== 'multi';
+  for (const tab of document.querySelectorAll<HTMLElement>('.console-tab[data-pane]:not([data-pane="log"])')) tab.hidden = mode !== 'multi';
+  lessonSwitch.hidden = mode !== 'tutorial';
+  showLessonView(mode === 'tutorial' ? 'lesson' : 'colony');
+  showPane('log');
+  chatList.replaceChildren();
+  unread = 0;
+}
+
+/** Loads a mode's scripts into the editor and starts its view. */
+async function enter(next: Mode): Promise<void> {
+  setMode(next);
+  const { set, fresh } = await api.scripts(next);
+  clearView(); // first, so a note from bringing scripts over stays in the log
+  loadSet(mode === 'single' && fresh ? importBrowserScripts(set) : set);
+  if (mode === 'single') {
+    local = new World(null, seed);
+    sourceLines = {};
+    setRunning(false);
+  } else {
+    remote = new RemoteColony();
+    await openColony();
+  }
+}
+
+/** Saves what's pending and stops the current mode, before the menu. */
+async function leave(): Promise<void> {
+  await flushSaves();
+  running = false;
+  const s = socket;
+  socket = null;
+  s?.close();
+  closeWorld();
+  showPane('log');
+  mapBar.hidden = true;
+}
+
+$('menu').addEventListener('click', async () => {
+  await leave();
+  await menu();
+});
+$('lessons').addEventListener('click', async () => {
+  await leave();
+  await tutorialMenu();
+});
+
+function loadSet(set: ScriptSet): void {
+  roles = set.roles.map(([name]) => name);
+  editor.replaceFiles({ forager: set.forager, ...Object.fromEntries(set.roles), wasp: set.wasp ?? DEFAULT_WASP, shared: set.shared, queen: set.queen });
+  editor.setError(null);
+  renderTabs();
+}
+
+/** The scripts in the editor, as a set to run or deploy. */
+function currentSet(): ScriptSet {
+  return {
+    forager: editor.getValue('forager'),
+    queen: editor.getValue('queen'),
+    shared: editor.getValue('shared'),
+    wasp: editor.getValue('wasp'),
+    roles: roles.map(r => [r, editor.getValue(r)]),
+  };
+}
+
+function linesOf(set: ScriptSet): Record<ScriptFile, string[]> {
+  const split = (code: string) => code.split('\n');
+  return {
+    forager: split(set.forager), queen: split(set.queen), shared: split(set.shared), wasp: split(set.wasp ?? DEFAULT_WASP),
+    ...Object.fromEntries(set.roles.map(([n, c]) => [n, split(c)])),
+  };
+}
+
+function clearView(): void {
+  selected = null;
+  lastSeq = -1;
+  shownCard = shownChips = '';
+  consoleEl.replaceChildren();
+}
+
+/** Shows a parse problem on its tab and in the log. */
+function showProblem(problem: ScriptProblem): void {
+  editor.setError(problem);
+  note(`${problem.file}.bee line ${problem.line}: ${problem.message}`, 'error');
+}
+
+// ---- single player ----
+
+/** Parses every script and starts a fresh colony running them. */
+function start(): void {
+  editor.setError(null);
+  const set = currentSet();
+  const parsed = parseScripts(set);
+  if (!('programs' in parsed)) {
+    consoleEl.replaceChildren();
+    return showProblem(parsed.problem);
+  }
+  if (lesson) {
+    local = lesson.world(parsed.programs);
+    met = lesson.goals.map(() => false);
+    panel.goals(met);
+  } else {
+    local = new World(parsed.programs, seed);
+    local.colony.say(null, `Meadow #${seed}: flowers bloom in new places every season, and every game is a new meadow.`, 'note');
+    seed = newSeed(); // the next Run or Restart grows a different meadow
+  }
+  sourceLines = linesOf(set);
+  clearView();
+  select(local.colony.bees[0]?.id ?? null);
+  acc = 0;
+  setRunning(true);
+  music.play(local.season); // from the Run click, so the browser lets sound start
+}
+
+function setRunning(on: boolean): void {
+  running = on && local.running;
+  runBtn.textContent = local.tick > 0 || running ? 'Restart' : 'Run';
+  pauseBtn.disabled = !local.running;
+  pauseBtn.textContent = running ? 'Pause' : 'Resume';
+}
+
+runBtn.addEventListener('click', start);
+pauseBtn.addEventListener('click', () => setRunning(!running));
+stepBtn.addEventListener('click', () => {
+  if (!local.running) start();
+  setRunning(false);
+  local.step();
+  checkGoals();
+});
+document.querySelectorAll<HTMLButtonElement>('button[data-speed]').forEach(btn => {
+  btn.addEventListener('click', () => {
+    speed = Number(btn.dataset.speed);
+    document.querySelectorAll('button[data-speed]').forEach(b => b.setAttribute('aria-pressed', String(b === btn)));
+  });
+});
+
+// ---- the tutorial ----
+
+const panel = new LessonPanel(lessonPanelEl, {
+  showMe: () => void showMe(),
+  restore: () => {
+    if (!savedAttempt) return;
+    loadLessonSet(savedAttempt);
+    savedAttempt = null;
+    panel.canRestore(false);
+  },
+  reset: () => void startOver(),
+  next: () => {
+    const i = lesson ? LESSONS.indexOf(lesson) : -1;
+    if (i >= 0 && i + 1 < LESSONS.length) openLesson(LESSONS[i + 1]);
+    else void leave().then(tutorialMenu);
+  },
+});
+
+/** The lesson list; picking a lesson opens it. */
+async function tutorialMenu(): Promise<void> {
+  doneLessons = await api.tutorial().then(r => new Set(r.done), () => doneLessons);
+  const id = await lessonList(doneLessons);
+  const picked = id && lessonById(id);
+  if (!picked) return menu();
+  closeScreens();
+  openLesson(picked);
+}
+
+/** Opens a lesson: its tabs and code (the player's draft, if they left one), its panel, and its world, ready to Run. */
+function openLesson(next: Lesson): void {
+  setMode('tutorial');
+  lesson = next;
+  met = next.goals.map(() => false);
+  savedAttempt = null;
+  clearView();
+  loadLessonSet(loadDraft(next) ?? lessonSet(next), false);
+  panel.open(next);
+  panel.canRestore(false);
+  // the meadow as the lesson starts, before Run
+  const parsed = parseScripts(currentSet());
+  local = next.world('programs' in parsed ? parsed.programs : { forager: [], queen: [] });
+  sourceLines = {};
+  setRunning(false);
+  const maps = local.maps[0] * local.maps[1];
+  mapBar.hidden = maps < 2;
+  showLessonView('lesson');
+}
+
+/** Puts a script set in the editor, showing the lesson's first tab, and keeps it as the lesson's draft. */
+function loadLessonSet(set: ScriptSet, save = true): void {
+  loadSet(set);
+  editor.show(files()[0]);
+  if (save) saveDraft();
+}
+
+async function showMe(): Promise<void> {
+  if (!lesson) return;
+  const sure = await confirmDialog({
+    title: 'Show a solution?',
+    message: 'This puts a working solution in the editor, ready to Run. Your own code is kept: "Bring back my code" puts it back.',
+    confirmLabel: 'Show me',
+  });
+  if (!sure) return;
+  savedAttempt = currentSet();
+  loadLessonSet(lessonSet(lesson, 'solution'));
+  panel.canRestore(true);
+}
+
+async function startOver(): Promise<void> {
+  if (!lesson) return;
+  const sure = await confirmDialog({
+    title: 'Start this lesson over?',
+    message: "This puts the lesson's starting code back in the editor, replacing yours.",
+    confirmLabel: 'Start over',
+    danger: true,
+  });
+  if (!sure) return;
+  savedAttempt = null;
+  panel.canRestore(false);
+  loadLessonSet(lessonSet(lesson));
+}
+
+/** Ticks off goals the running lesson world meets; when they're all met, the lesson is done for good. */
+function checkGoals(): void {
+  if (!lesson) return;
+  let changed = false;
+  lesson.goals.forEach((g, i) => {
+    if (!met[i] && g.check(local)) changed = met[i] = true;
+  });
+  if (!changed) return;
+  panel.goals(met);
+  if (!met.every(Boolean)) return;
+  note(`Lesson done: ${lesson.title}!`, 'season');
+  showLessonView('lesson');
+  if (!doneLessons.has(lesson.id)) {
+    doneLessons.add(lesson.id);
+    void api.lessonDone(lesson.id).catch(() => {});
+  }
+}
+
+/** Under the meadow, the lesson panel or the colony's stats and bee card. */
+function showLessonView(which: 'lesson' | 'colony'): void {
+  lessonPanelEl.hidden = mode !== 'tutorial' || which !== 'lesson';
+  hudEl.hidden = mode === 'tutorial' && which === 'lesson';
+  for (const tab of lessonSwitch.querySelectorAll<HTMLElement>('[data-show]')) tab.setAttribute('aria-selected', String(tab.dataset.show === which));
+}
+lessonSwitch.addEventListener('click', e => {
+  const tab = (e.target as HTMLElement).closest<HTMLElement>('[data-show]');
+  if (tab) showLessonView(tab.dataset.show as 'lesson' | 'colony');
+});
+
+// a lesson's code is kept in this browser as you type, so leaving and coming back keeps your work
+const draftKey = (l: Lesson) => `hive-script:lesson:${l.id}`;
+let draftTimer = 0;
+function saveDraft(): void {
+  if (!lesson) return;
+  const key = draftKey(lesson);
+  const set = currentSet();
+  clearTimeout(draftTimer);
+  draftTimer = window.setTimeout(() => {
+    try {
+      localStorage.setItem(key, JSON.stringify(set));
+    } catch {
+      // storage can be unavailable; the lesson just starts fresh next time
+    }
+  }, SAVE_DELAY);
+}
+function loadDraft(l: Lesson): ScriptSet | null {
+  try {
+    const raw = localStorage.getItem(draftKey(l));
+    const set = raw ? (JSON.parse(raw) as ScriptSet) : null;
+    return set && typeof set.forager === 'string' && Array.isArray(set.roles) ? set : null;
+  } catch {
+    return null;
+  }
+}
+
+// ---- multiplayer: the colony on the server ----
+
+async function openColony(): Promise<void> {
+  const status = await api.colony();
+  tickMs = status.tickMs;
+  colonyExists = status.exists;
+  if (status.set) sourceLines = linesOf(status.set);
+  openSocket();
+  if (!status.exists) await openWorld();
+  music.play(remote.season); // entering came from a click, so sound may start
+}
+
+function openSocket(): void {
+  const ws = new WebSocket(`${location.protocol === 'https:' ? 'wss' : 'ws'}://${location.host}/ws`);
+  socket = ws;
+  setLive('Connecting…', null);
+  ws.addEventListener('message', e => {
+    const msg = JSON.parse(String(e.data)) as
+      | { type: 'away'; since: string | null; events: { tick: number; tone: LogLine['tone'] | null; text: string; created_at: string }[] }
+      | { type: 'over'; reason: string }
+      | { type: 'chat-history'; messages: ChatMessage[] }
+      | { type: 'chat'; message: ChatMessage }
+      | { type: 'chat-problem'; problem: string }
+      | { type: 'state'; colony: ColonyJson };
+    if (msg.type === 'away') showAway(msg.since, msg.events);
+    else if (msg.type === 'chat-history') {
+      chatList.replaceChildren(...msg.messages.map(chatRow));
+      chatList.scrollTop = chatList.scrollHeight;
+    } else if (msg.type === 'chat') addChat(chatRow(msg.message), msg.message.username !== username);
+    else if (msg.type === 'chat-problem') addChat(problemRow(msg.problem), false);
+    else if (msg.type === 'over') {
+      colonyExists = false;
+      selected = null;
+      void openWorld();
+    } else {
+      remote.update(msg.colony);
+      lastStateAt = performance.now();
+      colonyExists = msg.colony.colony !== null;
+      setLive(`Live · tick ${remote.tick.toLocaleString('en-US')}`, true);
+    }
+  });
+  ws.addEventListener('close', e => {
+    if (socket !== ws) return; // closed on purpose, by leaving
+    if (e.code === 4001) {
+      username = null;
+      void leave().then(menu);
+      return;
+    }
+    setLive('Reconnecting…', false);
+    setTimeout(() => {
+      if (socket === ws && mode === 'multi') openSocket();
+    }, RECONNECT_MS);
+  });
+}
+
+function setLive(text: string, on: boolean | null): void {
+  liveEl.textContent = text;
+  liveEl.className = on === null ? 'live' : on ? 'live on' : 'live off';
+}
+
+/** The log's first rows on arrival: what the colony went through since the player was last here. */
+function showAway(since: string | null, events: { tick: number; tone: LogLine['tone'] | null; text: string }[]): void {
+  if (!since || !events.length) return;
+  note(`While you were away (since ${new Date(since).toLocaleString()}): ${events.length} event${events.length === 1 ? '' : 's'}.`, 'season');
+  for (const ev of events) consoleEl.append(logRow({ seq: -1, tick: ev.tick, who: null, text: ev.text, tone: ev.tone ?? undefined }));
+  note('Now, live:', 'season');
+}
+
+/** Watches another map of the world; the server sends it from the next message on (in the tutorial, the local world shows it). */
+function watch(map: Tile): void {
+  const size = mode === 'tutorial' ? local.maps : (overview?.size ?? [5, 5]);
+  if (map.x < 0 || map.y < 0 || map.x >= size[0] || map.y >= size[1]) return;
+  if (mode === 'tutorial') local.colony.viewMap = map;
+  else socket?.send(JSON.stringify({ type: 'watch', map }));
+}
+
+/** The map on screen, as [column, row]. */
+const watchedMap = (w: ColonyView): Tile => ({ x: Math.floor(w.origin.x / COLS), y: Math.floor(w.origin.y / ROWS) });
+
+mapBar.addEventListener('click', e => {
+  const go = (e.target as HTMLElement).closest<HTMLElement>('[data-go]')?.dataset.go;
+  if (!go) return;
+  const m = watchedMap(view());
+  watch(go === 'west' ? { x: m.x - 1, y: m.y } : go === 'east' ? { x: m.x + 1, y: m.y } : go === 'north' ? { x: m.x, y: m.y - 1 } : { x: m.x, y: m.y + 1 });
+});
+$('map-home').addEventListener('click', () => {
+  const hive = view().hive;
+  if (hive) watch({ x: Math.floor(hive.x / COLS), y: Math.floor(hive.y / ROWS) });
+  else void openWorld();
+});
+$('world-map').addEventListener('click', () => void openWorld());
+$('world-close').addEventListener('click', closeWorld);
+
+/**
+ * The world map over the meadow: every map of the player's world, who holds it and how they're
+ * doing. Without a colony, picking a free map founds one there; any other map is watched.
+ */
+async function openWorld(): Promise<void> {
+  $('world-problem').textContent = '';
+  try {
+    overview = await api.world();
+  } catch (err) {
+    note(`Couldn't load the world map: ${err instanceof Error ? err.message : err}`, 'error');
+    return;
+  }
+  worldPanel.hidden = false;
+  renderWorld();
+  clearInterval(worldTimer);
+  worldTimer = window.setInterval(async () => {
+    if (worldPanel.hidden) return clearInterval(worldTimer);
+    overview = await api.world().catch(() => overview);
+    renderWorld();
+  }, WORLD_REFRESH_MS);
+}
+
+function closeWorld(): void {
+  worldPanel.hidden = true;
+  clearInterval(worldTimer);
+}
+
+function renderWorld(): void {
+  if (!overview) return;
+  const w = overview;
+  const held = w.maps.filter(m => m.owner).length;
+  $('world-title').textContent = colonyExists ? `World #${w.world}` : w.fallen ? 'Your colony died out' : 'Pick a map for your colony';
+  const text = $('world-text');
+  text.className = w.fallen && !colonyExists ? 'world-text fallen' : 'world-text';
+  text.textContent = colonyExists
+    ? `${held} of ${w.maps.length} maps are held. Click any map to watch it; yours is outlined in honey. Your bees can fly onto any map.`
+    : `${w.fallen ? `${w.fallen} ` : ''}World #${w.world} has ${w.maps.length - held} free maps. Every map grows its own flowers, and bees can forage across the borders, so neighbors share the meadow. Pick a free map to found your colony on the scripts in your tabs, or click a held one to watch it.`;
+  renderWorldGrid(worldGrid, w, remote.map, cell => void pickMap(cell));
+}
+
+async function pickMap(cell: MapCell): Promise<void> {
+  if (colonyExists || cell.owner || cell.nest) {
+    watch(cell.map);
+    closeWorld();
+    return;
+  }
+  const sure = await confirmDialog({
+    title: `Found your colony on map [${cell.map.x}, ${cell.map.y}]?`,
+    message: 'Your queen and first forager move in, running the scripts in your tabs. The colony keeps working while you\'re away, until it dies out.',
+    confirmLabel: 'Found it here',
+  });
+  if (!sure) return;
+  editor.setError(null);
+  const set = currentSet();
+  try {
+    await flushSaves();
+    await api.startColony(set, cell.map);
+    sourceLines = linesOf(set);
+    colonyExists = true;
+    closeWorld();
+    clearView();
+  } catch (err) {
+    if (err instanceof ApiError && err.problem) {
+      showProblem(err.problem);
+      closeWorld();
+    } else {
+      $('world-problem').textContent = err instanceof Error ? err.message : String(err);
+      overview = await api.world().catch(() => overview);
+      renderWorld();
+    }
+  }
+}
+
+/** Sends every script to the running colony; every bee starts the new code at the next tick. */
+async function deploy(): Promise<void> {
+  if (!colonyExists) return void openWorld();
+  editor.setError(null);
+  const set = currentSet();
+  deployBtn.disabled = true;
+  try {
+    await flushSaves();
+    await api.deploy(set);
+    sourceLines = linesOf(set);
+  } catch (err) {
+    if (err instanceof ApiError && err.problem) showProblem(err.problem);
+    else note(`Couldn't deploy: ${err instanceof Error ? err.message : err}`, 'error');
+  } finally {
+    deployBtn.disabled = false;
+  }
+}
+deployBtn.addEventListener('click', () => void deploy());
+
+// ---- multiplayer: chat and the leaderboard, in tabs beside the log ----
+
+interface ChatMessage {
+  username: string;
+  text: string;
+  at: string;
+}
+
+document.querySelector('.console-head')!.addEventListener('click', e => {
+  const tab = (e.target as HTMLElement).closest<HTMLElement>('.console-tab');
+  if (tab) showPane(tab.dataset.pane as typeof pane);
+});
+
+function showPane(next: typeof pane): void {
+  pane = next;
+  for (const el of document.querySelectorAll<HTMLElement>('[data-pane]')) {
+    if (el.classList.contains('console-tab')) el.setAttribute('aria-selected', String(el.dataset.pane === next));
+    else el.hidden = el.dataset.pane !== next;
+  }
+  if (next === 'chat') {
+    unread = 0;
+    chatUnread.hidden = true;
+    chatList.scrollTop = chatList.scrollHeight;
+  }
+  clearInterval(leadersTimer);
+  if (next === 'leaders') {
+    void showLeaders();
+    leadersTimer = window.setInterval(() => void showLeaders(), LEADERS_REFRESH_MS);
+  }
+}
+
+function chatRow(m: ChatMessage): HTMLElement {
+  const row = document.createElement('div');
+  row.className = m.username === username ? 'log-row chat-row mine' : 'log-row chat-row';
+  const time = document.createElement('span');
+  time.className = 'log-meta';
+  time.textContent = new Date(m.at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+  const who = document.createElement('span');
+  who.className = 'chat-who';
+  who.textContent = m.username;
+  row.append(time, who, document.createTextNode(m.text));
+  return row;
+}
+
+function problemRow(text: string): HTMLElement {
+  const row = document.createElement('div');
+  row.className = 'log-row chat-row problem';
+  row.textContent = text;
+  return row;
+}
+
+function addChat(row: HTMLElement, fromOthers: boolean): void {
+  const atBottom = chatList.scrollHeight - chatList.scrollTop - chatList.clientHeight < 24;
+  chatList.append(row);
+  while (chatList.childElementCount > CHAT_LIMIT) chatList.firstElementChild!.remove();
+  if (atBottom || !fromOthers) chatList.scrollTop = chatList.scrollHeight;
+  if (fromOthers && pane !== 'chat') {
+    chatUnread.textContent = String(++unread);
+    chatUnread.hidden = false;
+  }
+}
+
+$<HTMLFormElement>('chat-form').addEventListener('submit', e => {
+  e.preventDefault();
+  const text = chatInput.value.trim();
+  if (!text || socket?.readyState !== WebSocket.OPEN) return;
+  socket.send(JSON.stringify({ type: 'chat', text }));
+  chatInput.value = '';
+});
+
+/** The leaderboard: every living colony in the player's world, by honey brought home. */
+async function showLeaders(): Promise<void> {
+  let board: Awaited<ReturnType<typeof api.leaderboard>>;
+  try {
+    board = await api.leaderboard();
+  } catch (err) {
+    leadersEl.textContent = `Couldn't load the leaderboard: ${err instanceof Error ? err.message : err}`;
+    return;
+  }
+  if (!board.colonies.length) {
+    leadersEl.textContent = 'No colonies in this world yet. Found one from the world map!';
+    return;
+  }
+  const table = document.createElement('table');
+  const head = table.createTHead().insertRow();
+  for (const h of ['#', 'Player', 'Map', 'Bees', 'Wasps', 'Honey made', 'Stolen', 'Kills', 'Age']) {
+    const th = document.createElement('th');
+    th.textContent = h;
+    head.append(th);
+  }
+  const body = table.createTBody();
+  board.colonies.forEach((c, i) => {
+    const row = body.insertRow();
+    if (c.mine) row.className = 'mine';
+    for (const v of [i + 1, c.mine ? `${c.owner} (you)` : c.owner ?? '?', `[${c.map.x}, ${c.map.y}]`, c.bees, c.wasps, c.made, c.stolen, c.kills, clock(c.age, tickMs)]) {
+      row.insertCell().textContent = String(v);
+    }
+  });
+  leadersEl.replaceChildren(table);
+}
+
+/** What the map bar says about the map on screen. */
+function mapText(w: ColonyView): string {
+  const m = watchedMap(w);
+  const here = (t: Tile) => Math.floor(t.x / COLS) === m.x && Math.floor(t.y / ROWS) === m.y;
+  const bees = (n: number) => `${n} bee${n === 1 ? '' : 's'}`;
+  const holder = w.otherHives[0]?.owner ?? null;
+  const strangers = w.visitors.filter(b => b.owner !== holder).length; // bees from neither this map's colony nor yours
+  if (w.hive && here(w.hive)) return `Map [${m.x}, ${m.y}] · your colony${w.visitors.length ? ` · ${bees(w.visitors.length)} from other colonies` : ''}`;
+  const yours = w.hive ? ` · ${w.bees.filter(here).length} of your bees here` : '';
+  const others = strangers ? ` · ${bees(strangers)} from other colonies` : '';
+  return `Map [${m.x}, ${m.y}] · ${w.otherHives.length ? `${holder ?? 'someone'}'s colony` : 'a free meadow'}${others}${yours}`;
+}
+
+// ---- saving scripts to the account ----
+
+const pendingSaves = new Map<ScriptFile, number>();
+
+function queueSave(file: ScriptFile): void {
+  if (mode === 'tutorial') return saveDraft();
+  clearTimeout(pendingSaves.get(file));
+  pendingSaves.set(file, window.setTimeout(() => {
+    pendingSaves.delete(file);
+    void persist(mode, file, editor.getValue(file));
+  }, SAVE_DELAY));
+}
+
+async function persist(m: PlayMode, file: ScriptFile, code: string, keepalive = false): Promise<void> {
+  if (m === 'tutorial') return saveDraft();
+  try {
+    await api.saveScript(m, file, code, roles.indexOf(file) + 1, keepalive);
+  } catch (e) {
+    note(`Couldn't save ${file}.bee: ${e instanceof Error ? e.message : e}`, 'error');
+  }
+}
+
+/** Saves every script with a save still waiting, now. */
+async function flushSaves(keepalive = false): Promise<void> {
+  const waiting = [...pendingSaves.keys()];
+  for (const file of waiting) clearTimeout(pendingSaves.get(file));
+  pendingSaves.clear();
+  await Promise.all(waiting.map(file => persist(mode, file, editor.getValue(file), keepalive)));
+}
+window.addEventListener('pagehide', () => void flushSaves(true));
+
+/**
+ * The first time an account opens single player, scripts this browser saved before accounts
+ * existed come along (once per browser), so nobody loses their work.
+ */
+function importBrowserScripts(set: ScriptSet): ScriptSet {
+  try {
+    if (localStorage.getItem('hive-script:imported')) return set;
+    localStorage.setItem('hive-script:imported', '1');
+    const get = (key: string) => localStorage.getItem(`hive-script:${key}`);
+    const names = (JSON.parse(get('roles') ?? '[]') as unknown[])
+      .filter((r): r is string => typeof r === 'string' && ROLE_NAME.test(r) && !RESERVED_NAMES.includes(r))
+      .slice(0, MAX_ROLES);
+    if (!get('forager') && !get('queen') && !get('shared') && !names.length) return set;
+    const found: ScriptSet = {
+      forager: get('forager') ?? set.forager,
+      queen: get('queen') ?? set.queen,
+      shared: get('shared') ?? set.shared,
+      wasp: set.wasp,
+      roles: names.map(r => [r, get(`role:${r}`) ?? roleTemplate(r)]),
+    };
+    void Promise.all([
+      persist('single', 'forager', found.forager),
+      persist('single', 'queen', found.queen),
+      persist('single', 'shared', found.shared),
+      ...found.roles.map(([r, code], i) => api.saveScript('single', r, code, i + 1).catch(() => {})),
+    ]);
+    note('Brought over the scripts this browser saved before accounts.', 'note');
+    return found;
+  } catch {
+    return set; // storage blocked: nothing to bring over
+  }
+}
+
+// ---- tabs and roles ----
+
 tabsEl.addEventListener('click', e => {
   const target = e.target as HTMLElement;
   const close = target.closest<HTMLElement>('[data-close]');
@@ -62,76 +800,6 @@ tabsEl.addEventListener('click', e => {
   const tab = target.closest<HTMLElement>('[data-file]');
   if (tab) editor.show(tab.dataset.file!);
 });
-renderTabs();
-
-let seed = newSeed();
-let world = new World(null, seed);
-const renderer = new Renderer(canvas);
-let running = false;
-let speed = 1;
-let acc = 0;
-let last = 0;
-let selected: Selection = null;
-let hover: Tile | null = null;
-let logShown = 0;
-// the scripts as they were when Run was pressed, for the cards' line text
-let sourceLines: Record<ScriptFile, string[]> = {};
-let shownChips = '';
-let shownCard = '';
-const music = new Music(loadSetting('music') === 'off');
-musicBtn.setAttribute('aria-pressed', String(!music.isMuted));
-
-// ---- controls ----
-
-/** Parses every script and starts a fresh colony running them. */
-function start(): void {
-  editor.setError(null);
-  const parsed: Record<ScriptFile, Programs['forager']> = {};
-  for (const file of files()) {
-    // shared.bee runs ahead of each role's script, so its lines are numbered apart (see locate())
-    const base = file === 'shared' ? SHARED_LINE_BASE : 0;
-    try {
-      parsed[file] = parse(editor.getValue(file), base + 1);
-    } catch (e) {
-      if (!(e instanceof ScriptError)) throw e;
-      const line = e.line - base;
-      editor.setError({ file, line, message: e.message });
-      consoleEl.replaceChildren(logRow({ tick: 0, who: null, text: `${file}.bee line ${line}: ${e.message}`, tone: 'error' }));
-      return;
-    }
-  }
-  const programs: Programs = {
-    forager: parsed.forager,
-    queen: parsed.queen,
-    shared: parsed.shared,
-    roles: Object.fromEntries(roles.map(r => [r, parsed[r]])),
-  };
-  world = new World(programs, seed);
-  world.say(null, `Meadow #${seed}: flowers bloom in new places every season, and every game is a new meadow.`, 'note');
-  seed = newSeed(); // the next Run or Restart grows a different meadow
-  sourceLines = Object.fromEntries(files().map(f => [f, editor.getValue(f).split('\n')]));
-  logShown = 0;
-  consoleEl.replaceChildren();
-  select(world.bees[0]?.id ?? null);
-  acc = 0;
-  setRunning(true);
-  music.play(world.season); // from the Run click, so the browser lets sound start
-}
-
-function setRunning(on: boolean): void {
-  running = on && world.running;
-  runBtn.textContent = world.tick > 0 || running ? 'Restart' : 'Run';
-  pauseBtn.disabled = !world.running;
-  pauseBtn.textContent = running ? 'Pause' : 'Resume';
-}
-
-/** Follows a bee or the queen, and shows the script it runs. */
-function select(target: Selection): void {
-  selected = target;
-  if (target !== null) editor.show(target === 'queen' ? 'queen' : (world.findBee(target)?.role ?? 'forager'));
-}
-
-// ---- tabs and roles ----
 
 function renderTabs(): void {
   const tabs = files().map(file => {
@@ -175,10 +843,9 @@ async function addRole(): Promise<void> {
   });
   if (name === null) return;
   roles = [...roles, name];
-  saveRoles();
   const code = roleTemplate(name);
   editor.addFile(name, code);
-  saveCode(name, code);
+  void persist(mode, name, code);
   editor.show(name);
 }
 
@@ -193,33 +860,32 @@ function roleNameProblem(name: string): string | null {
 }
 
 async function deleteRole(name: string): Promise<void> {
+  const until = mode === 'multi' ? 'until you deploy' : 'until you press Restart';
   const sure = await confirmDialog({
     title: `Delete ${name}.bee?`,
-    message: `This deletes the ${name} role and its script. Bees that already hatched as ${name} keep working until you press Restart, and a queen that still lays "${name}" will stop with an error.`,
+    message: `This deletes the ${name} role and its script. Bees that already hatched as ${name} keep working ${until}, and a queen that still lays "${name}" will stop with an error.`,
     confirmLabel: 'Delete role',
     danger: true,
   });
   if (!sure) return;
   roles = roles.filter(r => r !== name);
-  saveRoles();
-  removeCode(name);
+  clearTimeout(pendingSaves.get(name));
+  pendingSaves.delete(name);
   editor.removeFile(name);
   renderTabs();
+  if (mode === 'tutorial') return saveDraft();
+  await api.deleteScript(mode, name).catch(e => note(`Couldn't delete ${name}.bee: ${e instanceof Error ? e.message : e}`, 'error'));
 }
 
-runBtn.addEventListener('click', start);
-pauseBtn.addEventListener('click', () => setRunning(!running));
-stepBtn.addEventListener('click', () => {
-  if (!world.running) start();
-  setRunning(false);
-  world.step();
-});
-document.querySelectorAll<HTMLButtonElement>('button[data-speed]').forEach(btn => {
-  btn.addEventListener('click', () => {
-    speed = Number(btn.dataset.speed);
-    document.querySelectorAll('button[data-speed]').forEach(b => b.setAttribute('aria-pressed', String(b === btn)));
-  });
-});
+// ---- the meadow ----
+
+/** Follows a bee or the queen, and shows the script it runs. */
+function select(target: Selection): void {
+  selected = target;
+  const file = target === 'queen' ? 'queen' : target === null ? null : (view().findBee(target)?.role ?? 'forager');
+  if (file && files().includes(file)) editor.show(file); // a lesson may hide the file
+}
+
 musicBtn.addEventListener('click', () => {
   music.setMuted(!music.isMuted);
   musicBtn.setAttribute('aria-pressed', String(!music.isMuted));
@@ -230,8 +896,6 @@ chipsEl.addEventListener('click', e => {
   if (chip) select(chip.dataset.select === 'queen' ? 'queen' : Number(chip.dataset.select));
 });
 
-// ---- meadow interaction ----
-
 function canvasPoint(e: MouseEvent): { x: number; y: number } {
   const r = canvas.getBoundingClientRect();
   return { x: ((e.clientX - r.left) / r.width) * renderer.width, y: ((e.clientY - r.top) / r.height) * renderer.height };
@@ -239,10 +903,20 @@ function canvasPoint(e: MouseEvent): { x: number; y: number } {
 
 canvas.addEventListener('mousemove', e => {
   const p = canvasPoint(e);
-  hover = { x: Math.floor(p.x / TILE), y: Math.floor(p.y / TILE) };
-  const flower = world.flowerAt(hover.x, hover.y);
-  const what = world.atHive(hover) ? ' · the hive (click to follow the queen)' : flower ? ` · ${flower.kind} with ${flower.nectar} of ${flower.max} nectar` : '';
-  const scents = world.scentsAt(hover.x, hover.y).map(([name, strength]) => `"${name}" ${strength}`).join(', ');
+  const w = view();
+  hover = { x: w.origin.x + Math.floor(p.x / TILE), y: w.origin.y + Math.floor(p.y / TILE) };
+  const flower = w.flowerAt(hover.x, hover.y);
+  const other = w.otherHives.find(h => h.x === hover!.x && h.y === hover!.y);
+  const nest = w.nests.find(n => n.x === hover!.x && n.y === hover!.y);
+  const visitor = w.visitors.find(b => b.x === hover!.x && b.y === hover!.y);
+  const hurt = (u: { health: number; maxHealth: number }) => (u.health < u.maxHealth ? `, health ${u.health} of ${u.maxHealth}` : '');
+  const what = w.atHive(hover)
+    ? mode !== 'multi' || w.queen ? ' · the hive (click to follow the queen)' : ' · your hive'
+    : other ? ` · ${other.owner ?? 'another player'}'s hive`
+    : nest ? ` · ${nest.wild ? 'a wild wasp nest' : w.nest?.x === nest.x && w.nest?.y === nest.y ? 'your wasp nest' : `${nest.owner ?? 'another colony'}'s wasp nest`}${hurt(nest)}`
+    : visitor ? ` · ${visitor.owner === null ? 'a wild wasp' : `${visitor.owner}'s ${visitor.role === 'wasp' ? 'wasp' : 'bee'} #${visitor.id}`}${hurt(visitor)}`
+    : flower ? ` · ${flower.kind} with ${flower.nectar} of ${flower.max} nectar` : '';
+  const scents = w.scentsAt(hover.x, hover.y).map(([name, strength]) => `"${name}" ${strength}`).join(', ');
   hud.status.textContent = `Tile [${hover.x}, ${hover.y}]${what}${scents ? ` · scent ${scents}` : ''}`;
 });
 canvas.addEventListener('mouseleave', () => {
@@ -250,19 +924,22 @@ canvas.addEventListener('mouseleave', () => {
   hud.status.textContent = 'Hover the meadow to see tile positions.';
 });
 canvas.addEventListener('click', e => {
-  const p = canvasPoint(e);
-  let best: Bee | null = null;
+  const w = view();
+  const c = canvasPoint(e);
+  const p = { x: c.x + w.origin.x * TILE, y: c.y + w.origin.y * TILE }; // in world pixels, as place() gives them
+  let best: BeeView | null = null;
   let bestDist = 14;
-  for (const bee of world.bees) {
-    const at = renderer.place(world, bee, 0);
+  for (const bee of w.bees) {
+    const at = renderer.place(w, bee, 0);
     const d = Math.hypot(at.x - p.x, at.y - at.z - p.y);
     if (d < bestDist) {
       best = bee;
       bestDist = d;
     }
   }
+  if (best && mode === 'tutorial') showLessonView('colony'); // the bee's card is on the Colony side
   if (best) select(best.id);
-  else if (world.queen && world.atHive({ x: Math.floor(p.x / TILE), y: Math.floor(p.y / TILE) })) select('queen');
+  else if (w.queen && w.atHive({ x: Math.floor(p.x / TILE), y: Math.floor(p.y / TILE) })) select('queen');
 });
 
 // ---- main loop ----
@@ -270,18 +947,28 @@ canvas.addEventListener('click', e => {
 function frame(now: number): void {
   const dt = last ? Math.min(100, now - last) : 0;
   last = now;
-  if (running) {
-    acc += (dt * TICKS_PER_SECOND * speed) / 1000;
-    let ticks = Math.floor(acc);
-    acc -= ticks;
-    while (ticks-- > 0 && world.running) world.step();
-    if (world.error) editor.setError(world.error);
-    if (!world.running) setRunning(false);
+  let frac = 0; // how far between ticks, for smooth flight
+  if (mode !== 'multi') {
+    if (running) {
+      acc += (dt * TICKS_PER_SECOND * speed) / 1000;
+      let ticks = Math.floor(acc);
+      acc -= ticks;
+      while (ticks-- > 0 && local.running) {
+        local.step();
+        checkGoals();
+      }
+      if (local.error) editor.setError(local.error);
+      if (!local.running) setRunning(false);
+      frac = running ? acc : 0;
+    }
+  } else if (lastStateAt) {
+    frac = Math.min(1, (now - lastStateAt) / tickMs);
   }
-  if (world.tick > 0) music.play(world.season);
-  renderer.draw(world, running ? acc : 0, typeof selected === 'number' ? selected : null, hover);
-  world.events = [];
-  updateHud();
+  const w = view();
+  if (w.tick > 0) music.play(w.season);
+  renderer.draw(w, frac, typeof selected === 'number' ? selected : null, hover);
+  w.events = [];
+  updateHud(w);
   requestAnimationFrame(frame);
 }
 
@@ -289,68 +976,84 @@ function newSeed(): number {
   return 1 + Math.floor(Math.random() * 999_999);
 }
 
-function clock(ticks: number): string {
-  const s = Math.round(ticks / TICKS_PER_SECOND);
-  return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`;
+/** Game time as a clock: m:ss, or h:mm:ss for an hour or more. */
+function clock(ticks: number, msPerTick: number): string {
+  const s = Math.round((ticks * msPerTick) / 1000);
+  const mm = String(Math.floor(s / 60) % 60);
+  const ss = String(s % 60).padStart(2, '0');
+  return s >= 3600 ? `${Math.floor(s / 3600)}:${mm.padStart(2, '0')}:${ss}` : `${mm}:${ss}`;
 }
 
-function updateHud(): void {
-  hud.honey.textContent = String(world.honey);
-  hud.bees.textContent = String(world.bees.length);
-  hud.eggs.textContent = String(world.eggs.length);
-  hud.comb.textContent = `${world.space}/${world.comb}`;
-  hud.deaths.textContent = String(world.deaths);
-  hud.tick.textContent = world.tick.toLocaleString('en-US');
-  const season = world.season;
-  hud.season.textContent = `Year ${world.year} · ${season[0].toUpperCase()}${season.slice(1)}`;
+function updateHud(w: ColonyView): void {
+  hud.honey.textContent = String(w.honey);
+  hud.bees.textContent = String(w.bees.length);
+  hud.eggs.textContent = String(w.eggs.length);
+  hud.comb.textContent = `${w.space}/${w.comb}`;
+  hud.deaths.textContent = String(w.deaths);
+  hud.tick.textContent = w.tick.toLocaleString('en-US');
+  const season = w.season;
+  hud.season.textContent = `Year ${w.year} · ${season[0].toUpperCase()}${season.slice(1)}`;
   hud.season.dataset.season = season;
-  hud.seasonBar.style.width = `${(1 - world.seasonLeft / SEASON_TICKS) * 100}%`;
-  hud.seasonLeft.textContent = `${clock(world.seasonLeft)} left at 1×`;
+  hud.seasonBar.style.width = `${(1 - w.seasonLeft / SEASON_TICKS) * 100}%`;
+  if (!mapBar.hidden) {
+    const text = mapText(w);
+    if (mapLabel.textContent !== text) mapLabel.textContent = text;
+  }
+  hud.seasonLeft.textContent = mode !== 'multi' ? `${clock(w.seasonLeft, 1000 / TICKS_PER_SECOND)} left at 1×` : `${clock(w.seasonLeft, tickMs)} left`;
 
-  // how many bees of each role, once there are custom roles
-  const names = world.roleNames;
-  roleCountsEl.hidden = names.length < 2;
-  if (names.length > 1) {
+  // how many bees of each role, once there are custom roles or wasps
+  const names = w.roleNames;
+  const shown = names.length > 2 || w.bees.some(b => b.role === 'wasp');
+  roleCountsEl.hidden = !shown;
+  if (shown) {
     const counts = names
       .map(r => {
-        const color = roleColor(names, r);
+        const color = r === 'wasp' ? '#3b3326' : roleColor(names, r);
         const dot = color ? `<i class="role-dot" style="background:${color}"></i>` : '';
-        return `<span>${dot}${r} <b>${world.bees.filter(b => b.role === r).length}</b></span>`;
+        return `<span>${dot}${r} <b>${w.bees.filter(b => b.role === r).length}</b></span>`;
       })
       .join('');
     if (roleCountsEl.innerHTML !== counts) roleCountsEl.innerHTML = counts;
   }
 
   // the queen, then one chip per living bee with a small energy bar; rebuilt only when something visible changes
-  const queenChip = world.queen
-    ? `<button type="button" class="bee-chip queen ${queenStatus(world.queen).tone}${selected === 'queen' ? ' on' : ''}" data-select="queen">Queen</button>`
+  const queenChip = w.queen
+    ? `<button type="button" class="bee-chip queen ${queenStatus(w.queen).tone}${selected === 'queen' ? ' on' : ''}" data-select="queen">Queen</button>`
     : '';
-  const chips = queenChip + world.bees
+  const chips = queenChip + w.bees
     .map(b => {
       const s = beeStatus(b);
       const pct = Math.round((b.energy / MAX_ENERGY) * 20) * 5;
-      return `<button type="button" class="bee-chip ${s.tone}${b.id === selected ? ' on' : ''}" data-select="${b.id}" title="${s.label}">#${b.id}<i style="width:${pct}%"></i></button>`;
+      const wasp = b.role === 'wasp';
+      return `<button type="button" class="bee-chip ${s.tone}${wasp ? ' wasp' : ''}${b.id === selected ? ' on' : ''}" data-select="${b.id}" title="${wasp ? 'Wasp' : 'Bee'}: ${s.label}">#${b.id}<i style="width:${pct}%"></i></button>`;
     })
     .join('');
   if (chips !== shownChips) chipsEl.innerHTML = shownChips = chips;
 
   let card: string;
-  if (selected === 'queen' && world.queen) {
-    editor.setActiveLine(world.queen.runner.finished ? null : 'queen', world.queen.runner.line || null);
-    card = queenCard(world, sourceLines.queen);
+  if (selected === 'queen' && w.queen) {
+    editor.setActiveLine(w.queen.runner.finished ? null : 'queen', w.queen.runner.line || null);
+    card = queenCard(w, sourceLines.queen ?? []);
   } else {
-    const bee = world.findBee(typeof selected === 'number' ? selected : null);
+    const bee = w.findBee(typeof selected === 'number' ? selected : null);
     const at = bee && !bee.death && !bee.runner.finished && bee.runner.line ? locate(bee.role, bee.runner.line) : null;
     editor.setActiveLine(at?.file ?? null, at?.line ?? null);
-    card = bee
-      ? beeCard(bee, sourceLines, TICKS_PER_SECOND)
-      : `<p class="muted">${world.running ? 'Click a bee or the hive, or pick from the list, to see stats.' : 'Press Run to start the colony, then click a bee to see its stats.'}</p>`;
+    const idle = mode !== 'multi'
+      ? local.running ? 'Click a bee or the hive, or pick from the list, to see stats.' : 'Press Run to start the colony, then click a bee to see its stats.'
+      : colonyExists ? 'Click one of your bees or your hive, or pick from the list, to see stats.' : 'Pick a free map on the world map to found your colony, then click a bee to see its stats.';
+    card = bee ? beeCard(bee, sourceLines, mode !== 'multi' ? TICKS_PER_SECOND : 1000 / tickMs) : `<p class="muted">${idle}</p>`;
   }
   if (card !== shownCard) cardEl.innerHTML = shownCard = card;
 
-  for (; logShown < world.log.length; logShown++) consoleEl.append(logRow(world.log[logShown]));
-  while (consoleEl.childElementCount > CONSOLE_LIMIT) consoleEl.firstElementChild!.remove();
-  if (logShown && consoleEl.lastElementChild) consoleEl.scrollTop = consoleEl.scrollHeight;
+  // new log lines: everything after the newest one already shown
+  let from = w.log.length;
+  while (from > 0 && w.log[from - 1].seq > lastSeq) from--;
+  for (let i = from; i < w.log.length; i++) consoleEl.append(logRow(w.log[i]));
+  if (from < w.log.length) {
+    lastSeq = w.log[w.log.length - 1].seq;
+    while (consoleEl.childElementCount > CONSOLE_LIMIT) consoleEl.firstElementChild!.remove();
+    consoleEl.scrollTop = consoleEl.scrollHeight;
+  }
 }
 
 function logRow(line: LogLine): HTMLElement {
@@ -363,53 +1066,13 @@ function logRow(line: LogLine): HTMLElement {
   return row;
 }
 
-// ---- saving scripts and settings in this browser ----
-
-// forager, queen and shared keep their original keys; each custom role's script is "role:<name>"
-function codeKey(file: ScriptFile): string {
-  return `hive-script:${DEFAULTS[file] === undefined ? `role:${file}` : file}`;
+/** A line in the log from the game itself rather than the colony (saving, deploying). */
+function note(text: string, tone: LogLine['tone']): void {
+  consoleEl.append(logRow({ seq: -1, tick: view().tick, who: null, text, tone }));
+  consoleEl.scrollTop = consoleEl.scrollHeight;
 }
 
-function loadCode(file: ScriptFile): string {
-  const fallback = DEFAULTS[file] ?? roleTemplate(file);
-  try {
-    return localStorage.getItem(codeKey(file)) ?? fallback;
-  } catch {
-    return fallback;
-  }
-}
-
-function saveCode(file: ScriptFile, code: string): void {
-  try {
-    localStorage.setItem(codeKey(file), code);
-  } catch {
-    // storage can be unavailable (private windows); the script just won't persist
-  }
-}
-
-function removeCode(file: ScriptFile): void {
-  try {
-    localStorage.removeItem(codeKey(file));
-  } catch {
-    // nothing was saved, then
-  }
-}
-
-/** The saved list of custom roles, skipping anything that isn't a valid role name. */
-function loadRoles(): string[] {
-  try {
-    const list: unknown = JSON.parse(loadSetting('roles') ?? '[]');
-    if (!Array.isArray(list)) return [];
-    const valid = list.filter((r): r is string => typeof r === 'string' && ROLE_NAME.test(r) && !RESERVED_NAMES.includes(r));
-    return [...new Set(valid)].slice(0, MAX_ROLES);
-  } catch {
-    return [];
-  }
-}
-
-function saveRoles(): void {
-  saveSetting('roles', JSON.stringify(roles));
-}
+// ---- settings kept in this browser ----
 
 function loadSetting(name: string): string | null {
   try {
@@ -423,9 +1086,10 @@ function saveSetting(name: string, value: string): void {
   try {
     localStorage.setItem(`hive-script:${name}`, value);
   } catch {
-    // as with scripts, the setting just won't persist
+    // storage can be unavailable (private windows); the setting just won't persist
   }
 }
 
 setRunning(false);
 requestAnimationFrame(frame);
+void boot();

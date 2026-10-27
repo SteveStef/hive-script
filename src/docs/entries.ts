@@ -1,4 +1,5 @@
 import {
+  BEE_CAPACITY, BEE_HEALTH, HEALTH_PER_HONEY, NEST_BUILD_TICKS, NEST_COST, NEST_HEALTH, STEAL_TICKS, STING_DAMAGE, STING_TICKS, WASP_CAPACITY, WASP_COST, WASP_HEALTH,
   BEE_COST, BUILD_COST, BUILD_TICKS, COLLECT_TICKS, DEPOSIT_TICKS, EAT_TICKS, ENERGY_PER_HONEY, HATCH_TICKS, LAY_TICKS,
   BLOOMS, MARK_TICKS, MOVE_TICKS, SCENT_LIFE, SCENT_MAX, SEASON_TICKS, SENSE_RANGE, SHARED_LINE_BASE, SMELL_RANGE,
   type Programs, type WorldOptions,
@@ -10,7 +11,14 @@ export interface Demo {
   forager?: string; // what the demo bee runs; an idle bee if left out
   queen?: string; // what the queen runs; an idle queen if left out
   view: [number, number, number, number]; // part of the meadow to show, in tiles: x, y, width, height
-  follow?: 'bee' | 'queen'; // whose line is highlighted and whose prints are shown (default: the bee)
+  follow?: 'bee' | 'queen' | 'wasp'; // whose line is highlighted and whose prints are shown (default: the bee)
+  wasp?: string; // what the colony's wasps run
+  wasps?: number; // wasps the colony starts with
+  health?: number; // the first bee's starting health
+  nest?: [number, number]; // a wild wasp nest...
+  nestWasps?: number; // ...and how many wild wasps are in it
+  rival?: { x: number; y: number; honey: number }; // another colony's hive, named "rival"
+  colonyNest?: [number, number]; // the colony's own wasp nest, already built
   bees?: number;
   honey?: number;
   tick?: number;
@@ -31,7 +39,7 @@ export interface DocEntry {
   covers?: string[]; // other names this card also explains
 }
 
-export const SECTIONS = ['Moving', 'Working', 'What a bee knows', 'Scent', 'The queen', 'Roles', 'The colony', 'Time and seasons', 'Utilities', 'Language helpers'];
+export const SECTIONS = ['Moving', 'Working', 'What a bee knows', 'Scent', 'The queen', 'Roles', 'Raids and wasps', 'The colony', 'Time and seasons', 'Utilities', 'Language helpers'];
 
 // Clips use one fixed meadow, so the positions in their scripts always land on flowers.
 // (In the game, flowers bloom in new places every season.) The hive sits at [2, 6].
@@ -50,12 +58,17 @@ const IDLE = 'while True:\n    wait(1000)';
 /** The scripts a clip runs; an idle bee or queen where it leaves one out. */
 export function demoPrograms(d: Demo): Programs {
   const roles = Object.fromEntries(Object.entries(d.roles ?? {}).map(([name, src]) => [name, parse(src)]));
-  return { forager: parse(d.forager ?? IDLE), queen: parse(d.queen ?? IDLE), roles, shared: parse('', SHARED_LINE_BASE + 1) };
+  return { forager: parse(d.forager ?? IDLE), queen: parse(d.queen ?? IDLE), wasp: parse(d.wasp ?? IDLE), roles, shared: parse('', SHARED_LINE_BASE + 1) };
 }
 
 /** The world a clip starts from. */
 export function demoOptions(d: Demo): WorldOptions {
-  return { bees: d.bees ?? 1, honey: d.honey, tick: d.tick, energy: d.energy, comb: d.comb, flowers: DEMO_MEADOW };
+  return {
+    bees: d.bees ?? (d.wasps ? 0 : 1), wasps: d.wasps, honey: d.honey, tick: d.tick, energy: d.energy, health: d.health, comb: d.comb, flowers: DEMO_MEADOW,
+    nests: d.nest ? [d.nest] : undefined, nestWasps: d.nestWasps,
+    rival: d.rival && { ...d.rival, owner: 'rival' },
+    nest: d.colonyNest,
+  };
 }
 
 const HIVE_VIEW: Demo['view'] = [0, 3, 7, 6];
@@ -165,6 +178,14 @@ export const DOCS: Record<string, DocEntry> = {
     time: instant,
     demo: { forager: 'move_to([7, 9])\nprint("the hive is at", hive_pos())\nmove_to(hive_pos())', view: MEADOW_VIEW },
   },
+  my_map: {
+    section: 'What a bee knows',
+    details: 'Single player is one map, 20 tiles across and 12 down, so my_map() is always [0, 0]. In multiplayer the world is a 5 by 5 grid of maps, each with its own flowers, and every position is in one big grid: map [1, 0] starts at [20, 0], map [0, 1] at [0, 12]. Bees fly across map borders like any other tile, so my_map() helps a script stay near home or explore a neighbor on purpose. map_at(position) says which map a position is on. The queen can use both.',
+    returns: 'The map as [column, row].',
+    time: instant,
+    covers: ['map_at'],
+    demo: { forager: 'm = my_map()\nprint("our map:", m, "starts at", [m[0] * 20, m[1] * 12])\nprint("[7, 9] is on map", map_at([7, 9]))\nmove_to([7, 9])', view: MEADOW_VIEW },
+  },
   at_hive: {
     section: 'What a bee knows',
     details: 'Whether the bee is on the hive tile, where deposit(), eat() and build() work.',
@@ -223,7 +244,7 @@ export const DOCS: Record<string, DocEntry> = {
   // ---- the queen ----
   lay: {
     section: 'The queen',
-    details: `Only the queen can lay, from queen.bee. An egg costs ${BEE_COST} honey and needs a free cell of comb. It hatches after ${HATCH_TICKS} ticks into a bee of the role you name, like lay("builder"), which runs that role's script for life; lay() with no name lays a forager. Naming a role that doesn't exist stops the game with an error, so typos show up right away. Laying too eagerly is the classic way to starve a colony before winter.`,
+    details: `Only the queen can lay, from queen.bee. An egg costs ${BEE_COST} honey and needs a free cell of comb; a wasp egg costs ${WASP_COST} and needs no comb, since wasps live in the colony's nest. It hatches after ${HATCH_TICKS} ticks into a bee of the role you name, like lay("builder"), which runs that role's script for life; lay() with no name lays a forager, and lay("wasp") a wasp (only once the colony has built its wasp nest; see build_nest). Naming a role that doesn't exist stops the game with an error, so typos show up right away. Laying too eagerly is the classic way to starve a colony before winter.`,
     returns: 'True if she laid an egg; False without enough honey or free comb.',
     time: `${LAY_TICKS} ticks`,
     demo: {
@@ -253,6 +274,55 @@ export const DOCS: Record<string, DocEntry> = {
     demo: { forager: 'print("my role is", role())\nprint("every role:", roles())', roles: { builder: 'while True:\n    wait(100)' }, view: HIVE_VIEW, length: 120 },
   },
 
+  // ---- raids and wasps ----
+  health: {
+    section: 'Raids and wasps',
+    details: `A bee has ${BEE_HEALTH} health and a wasp ${WASP_HEALTH}. Each sting takes ${STING_DAMAGE}, and at 0 the bee dies ("stung"). Stings come from other players' wasps and from wild wasps around their nests (in multiplayer). eat() at the hive heals as well as refilling energy: ${HEALTH_PER_HONEY} health per honey, and a hurt bee eats until it's whole. This bee starts hurt.`,
+    returns: 'Whole numbers.',
+    time: instant,
+    covers: ['max_health'],
+    demo: { forager: 'print("health:", health(), "of", max_health())\ngo_home()\nprint("ate", eat(), "honey")\nprint("health:", health())', view: [0, 3, 8, 7], health: 4, honey: 10 },
+  },
+  enemies_near: {
+    section: 'Raids and wasps',
+    details: `Where the enemies are: other colonies' bees and wasps, and wild wasps, within ${SENSE_RANGE} tiles, nearest first. Wild wasps keep a nest on some unclaimed maps in multiplayer, and sting anyone's bees that come near (never inside a hive). This clip hangs a nest nearby: the bee peeks, sees them, and flees home.`,
+    returns: 'A list of positions, like [[9, 4], [10, 4]]; empty when no one is in sight.',
+    time: instant,
+    demo: { forager: 'print("near the hive:", enemies_near())\nmove_to([5, 4])\nprint("closer:", enemies_near())\ngo_home()', view: [0, 0, 13, 9], nest: [11, 3], nestWasps: 2, honey: 10, length: 260 },
+  },
+  owner_at: {
+    section: 'Raids and wasps',
+    details: 'Who a tile belongs to: the player whose hive, or bee or wasp, is on it, "wild" for a wild nest or wasp, or None for open meadow. In single player your own colony is "you". Every script can ask, the queen included.',
+    returns: 'Text, or None.',
+    time: instant,
+    demo: { forager: 'print("our hive:", owner_at(hive_pos()))\nprint("[12, 6]:", owner_at([12, 6]))\nprint("[7, 7]:", owner_at([7, 7]))', view: [0, 3, 15, 7], rival: { x: 12, y: 6, honey: 5 }, length: 120 },
+  },
+  steal: {
+    section: 'Raids and wasps',
+    details: `At another colony's hive, steal() takes as much of its honey as the bee can carry (${BEE_CAPACITY} for a bee, ${WASP_CAPACITY} for a wasp) and holds it like nectar, so deposit() banks it at home. Nothing stops a raid automatically: the owner's defense is their code, usually wasps guarding the hive. Both colonies' logs record the raid. Anywhere else it takes nothing.`,
+    returns: 'How much honey it took.',
+    time: `${STEAL_TICKS} ticks`,
+    demo: { forager: 'move_to([12, 6])\nprint("stole", steal(), "honey")\ngo_home()\nprint("banked", deposit())', view: [0, 3, 15, 7], rival: { x: 12, y: 6, honey: 5 } },
+  },
+  sting: {
+    section: 'Raids and wasps',
+    details: `Wasps are the colony's fighters. Once the colony has a wasp nest (build_nest), the queen lays them with lay("wasp") for ${WASP_COST} honey each, and every wasp runs wasp.bee. A wasp has ${WASP_HEALTH} health, can carry ${WASP_CAPACITY} honey off in a raid, and can't collect nectar or build. sting(position) hits one enemy on the tile right next to it (wasps first) for ${STING_DAMAGE} damage, or a wild nest there: a nest has ${NEST_HEALTH} health, and a destroyed one hangs again somewhere next spring. Players' wasp nests can be stung down the same way. This wasp attacks an empty wild nest.`,
+    returns: 'True if it hit something.',
+    time: `${STING_TICKS} ticks`,
+    demo: { wasp: 'move_to([8, 6])\nhits = 0\nwhile sting([9, 6]):\n    hits = hits + 1\n    print("hit the nest", hits, "times")', view: [0, 3, 12, 7], follow: 'wasp', wasps: 1, nest: [9, 6], nestWasps: 0, length: 300 },
+  },
+  build_nest: {
+    section: 'Raids and wasps',
+    details: `Wasps don't come cheap. First the colony saves up ${NEST_COST} honey, and the queen builds its wasp nest with build_nest(position) on any free tile of your own map (not the hive or a flower); it takes her ${NEST_BUILD_TICKS} ticks. From then on lay("wasp") raises wasps, ${WASP_COST} honey each, and they hatch at the nest. Wasps live in the nest, so they need no comb. A colony has one nest. It has ${NEST_HEALTH} health, and enemy wasps can sting it down; then the queen can't lay wasps until you build another, though wasps already hatched live on. nest_pos() says where it is, or None.`,
+    returns: 'build_nest(): True if she built it; False without the honey, with a nest already, or on a taken tile. nest_pos(): [x, y] or None.',
+    time: `${NEST_BUILD_TICKS} ticks`,
+    covers: ['nest_pos'],
+    demo: {
+      queen: 'print("nest:", nest_pos(), "| lay a wasp?", lay("wasp"))\nprint("built:", build_nest([6, 5]))\nprint("nest:", nest_pos())\nlay("wasp")\nwait(320)\nprint("wasps:", role_count("wasp"))',
+      view: [0, 2, 9, 7], follow: 'queen', honey: 190, length: 560,
+    },
+  },
+
   // ---- the colony ----
   honey: {
     section: 'The colony',
@@ -274,7 +344,7 @@ export const DOCS: Record<string, DocEntry> = {
   },
   comb: {
     section: 'The colony',
-    details: 'Comb is the hive\'s space. comb() is the total number of cells; space() is how many are free. Every bee and every egg uses one, so when space() is 0 the queen cannot lay until workers build() more.',
+    details: 'Comb is the hive\'s space. comb() is the total number of cells; space() is how many are free. Every bee and every egg uses one, so when space() is 0 the queen cannot lay until workers build() more. Wasps are the exception: they live in the colony\'s wasp nest, so they take no comb.',
     returns: 'Whole numbers.',
     time: instant,
     covers: ['space'],

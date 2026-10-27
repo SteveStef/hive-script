@@ -6,6 +6,11 @@ import { API_DOCS } from '../sim/apiDocs';
 import type { ScriptFile } from '../sim/world';
 
 self.MonacoEnvironment = { getWorker: () => new EditorWorker() };
+// Monaco rejects its pending work with a "Canceled" error when models are swapped out (switching
+// between single player and multiplayer scripts). It's expected, so it shouldn't count as a page error.
+window.addEventListener('unhandledrejection', e => {
+  if (e.reason instanceof Error && e.reason.name === 'Canceled') e.preventDefault();
+});
 
 const LANGUAGE = 'beescript';
 
@@ -29,9 +34,13 @@ monaco.languages.setLanguageConfiguration(LANGUAGE, {
   // indent after a line ending in ":" (if, while, def...)
   onEnterRules: [{ beforeText: /:\s*(#.*)?$/, action: { indentAction: monaco.languages.IndentAction.Indent } }],
 });
-/** Whether a file is the queen's script; every other file (each role, shared.bee) is a worker script. */
-const isQueen = (model: monaco.editor.ITextModel) => model.uri.path === '/queen.bee';
-const fits = (only: 'worker' | 'queen' | undefined, model: monaco.editor.ITextModel) => !only || (only === 'queen') === isQueen(model);
+/** Which scripts a function belongs in: the queen's, wasp.bee (and shared.bee, which wasps run too), or any worker file. */
+const fits = (only: 'worker' | 'wasp' | 'queen' | undefined, model: monaco.editor.ITextModel) => {
+  const queen = model.uri.path === '/queen.bee';
+  if (only === 'queen') return queen;
+  if (only === 'wasp') return model.uri.path === '/wasp.bee' || model.uri.path === '/shared.bee';
+  return !only || !queen;
+};
 
 monaco.languages.registerCompletionItemProvider(LANGUAGE, {
   provideCompletionItems(model, position) {
@@ -87,6 +96,8 @@ export interface CodeEditor {
   addFile(file: ScriptFile, code: string): void;
   /** Removes a file; if it was showing, the editor switches to forager.bee. */
   removeFile(file: ScriptFile): void;
+  /** Swaps in a whole new set of files (another mode's scripts) and shows forager.bee. */
+  replaceFiles(files: Record<ScriptFile, string>): void;
   /** Switches the editor to a file. */
   show(file: ScriptFile): void;
   onShow(listener: (file: ScriptFile) => void): void;
@@ -145,6 +156,17 @@ export function createEditor(host: HTMLElement, initial: Record<ScriptFile, stri
       models.delete(file);
       highlights.delete(file);
       model.dispose();
+    },
+    replaceFiles: files => {
+      // the old models go first: Monaco allows only one model per file name
+      editor.setModel(null);
+      for (const model of models.values()) model.dispose();
+      models.clear();
+      highlights.clear();
+      active = { file: null, line: null };
+      for (const [file, code] of Object.entries(files)) addFile(file, code);
+      editor.setModel(models.get('forager')!);
+      showListeners.forEach(l => l('forager'));
     },
     show,
     onShow: listener => {

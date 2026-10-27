@@ -5,17 +5,58 @@ in the hive runs its own copy of it.
 
 ## Running it
 
+The game is a website with accounts: single player runs in the browser, and multiplayer is a
+shared world that runs on the game server around the clock. Locally you need Node 20 and Docker.
+
 ```sh
 npm install
-npm run dev        # open the printed localhost URL
-npm test           # language and simulation tests
-npm run build      # typecheck + production build into dist/
-npm run balance    # simulate the default scripts for two years and print each season
+cp .env.example .env   # database URL, server port, game clock
+npm run db:up          # Postgres 16 in Docker, on port 5433 (also creates hive_test)
+npm run dev            # web client (Vite) + game server; open the printed localhost URL
+npm test               # language and simulation tests
+npm run test:server    # accounts, scripts and colony tests against hive_test (needs db:up)
+npm run build          # typecheck + production build into dist/
+npm run balance        # simulate the default scripts for two years and print each season
+npm run bench          # time a full 25-colony world, to check ticks stay well under GAME_TICK_MS
 ```
+
+Sign up, then pick **Single player**, **Multiplayer** or **Tutorial** from the menu. The
+tutorial is 14 hands-on lessons, from your first bee to wasps and raids: each gives a goal the
+game checks as your code runs, with hints and a **Show me** solution. Lessons run their own
+starter scripts in small fixed worlds (the multiplayer ones in a two-map practice world on
+your computer), never your own scripts; finished lessons get a checkmark on your account. Scripts are saved to
+your account (single player and multiplayer keep separate sets).
+
+**Multiplayer** is a world of 5×5 maps (each the size of single player's meadow) shared by
+up to 25 players. The **World map** shows who holds each map; pick a free one to found your
+colony there. Positions are world positions (map `[c, r]` covers x `20c..20c+19`,
+y `12r..12r+11`), borders are open, so bees forage on neighbors' maps, and `my_map()` and
+`map_at(position)` give map numbers. The arrows and **Home** in the bar over the meadow
+switch which map you watch; other players' hives and bees show there, but never their code.
+**Deploy** (or Ctrl+Enter) sends every script to your colony, and each bee starts the new
+code from the top. The colony keeps running when the page is closed, and the log opens with
+what happened while you were away. A colony that dies out frees its map and its player picks
+again. When every map is held, newcomers get a new world.
+
+Players can fight. Every bee has health (a wasp has more), and `eat()` at the hive heals.
+A bee or wasp at another colony's hive can `steal()` its honey and `deposit()` it at home.
+Wasps take saving up for: the queen builds the colony's **wasp nest** with
+`build_nest(position)` for 150 honey, and only then lays **wasps** with `lay("wasp")`, which
+hatch at the nest and live there: wasps need no comb. Enemy wasps can sting a nest down. Every wasp runs **wasp.bee**, can't collect
+nectar, and can `sting()` an enemy on the next tile. The default wasp.bee stands guard
+beside the hive. Each world also hangs three **wild wasp nests** on unclaimed maps: their
+wasps sting anyone's bees nearby (never inside a hive), a map with a nest can't be claimed,
+and a nest destroyed by players' wasps hangs again on a free map next spring.
+`enemies_near()` and `owner_at(position)` let scripts see who's around. Under the editor,
+**Chat** talks to everyone in your world and **Leaders** ranks its colonies by honey made. The server ticks every
+`GAME_TICK_MS` (133 by default: 7.5 ticks a second, half single player's 1×) and saves every
+world each 15 seconds and on shutdown.
 
 A colony runs a script per role, each in its own editor tab:
 
 - **forager.bee**: every forager runs its own copy. The starting bee is a forager.
+- **wasp.bee**: every wasp runs this. Once the colony has a wasp nest (`build_nest`), the
+  queen lays wasps with `lay("wasp")` for 30 honey; they hatch at the nest.
 - **Custom roles**: **+ Role** adds up to 5 more (builder.bee, nurse.bee...). A role is
   just a script; bees hatch into the role the queen names with `lay("builder")` and keep it
   for life. `role()`, `roles()` and `role_count()` let scripts ask about them.
@@ -43,17 +84,37 @@ src/
     interpreter.ts  runs a tree; pauses after every statement and on every action
     builtins.ts     print, range, len, min, max, ...
   sim/       the game rules; no drawing here
-    world.ts        grid, flowers, hive, bees; advances one tick at a time, seeded
+    world.ts        World (maps, flowers, clock) and Colony (hive, bees, honey, log); one tick at a time, seeded
+    view.ts         ColonyView, what the screen draws; RemoteColony, built from the server's JSON
     api.ts          what a script can call: move, collect, nearest_flower, ...
     apiDocs.ts      descriptions used by editor autocomplete and hover
   render/    draws the world onto a 320x192 pixel canvas
   audio/     background music: a CC0 loop per season, cross-faded
   ui/        Monaco editor setup, and the bee and queen stat cards
   docs/      the docs page: entries.ts holds each card's text and example clip
-  main.ts    wires the editor, simulation and renderer together
+  app/       talking to the server (api.ts), the title pages, and the world map (worldMap.ts)
+  tutorial/  the lessons (lessons.ts: text, starter code, world, goals, solution) and their panel
+  main.ts    wires the editor, simulation and renderer together, in either mode
+server/
+  main.ts       starts the server: migrations, saved worlds, the tick loop
+  auth.ts       sign up, log in, sessions (argon2id hashes, httpOnly cookie)
+  scripts.ts    saved scripts per account and mode
+  tutorial.ts   which tutorial lessons each player has finished
+  worlds.ts     every multiplayer world: tick loop, claiming maps, deploys, saving, chat,
+                the leaderboard, and the live WebSocket
+  migrations/   the database schema, applied in order on start
 scripts/
   balance.ts    two-year simulation of the default scripts, for tuning
+  bench-world.ts  how long ticks take in a full 25-colony world
 ```
+
+The server runs the same `src/sim` and `src/lang` code as the browser. A `World` is the land
+and the clock; each `Colony` on it is one player's hive. Single player is a world of one map
+with one colony (`world.colony`), and multiplayer is a world of 5×5 maps where colonies are
+`found()`ed and `remove()`d. `ColonyView` (`src/sim/view.ts`) is the read-only shape the
+renderer and cards draw from: one map of the world, plus the player's own colony. In single
+player that is the local `Colony`; in multiplayer it is a `RemoteColony` rebuilt from the
+server's JSON after every tick.
 
 Key ideas:
 
@@ -81,6 +142,10 @@ Key ideas:
 - **Scent is how bees share what they know.** `mark("food")` scents the bee's own tile;
   any bee can `smell("food")` the strongest mark within 12 tiles (twice its sight), or read
   its own tile with `smell_here()`. Marks fade over 900 ticks and show on the meadow, one color per name.
+  Each colony smells only its own marks, so in multiplayer scent is private.
+- **Fights.** A sting does 5 damage; a bee has 10 health and a wasp 30. Wild wasps follow a
+  small built-in mind (`stepWild()` in `world.ts`) instead of a script: they chase enemies
+  they can see within two maps of their nest and wander near it otherwise.
 - **Everything is available from the start.** There are no unlocks; the puzzle is the colony,
   not earning functions.
 - **The simulation is deterministic.** The same script and seed always play out the
@@ -93,15 +158,19 @@ numbers, text, `True / False / None`, lists and `[x, y]` positions, `and / or / 
 Game functions are listed in `src/sim/apiDocs.ts` and appear in editor autocomplete.
 When you add one, also give it a card in `src/docs/entries.ts`; `tests/docs.test.ts` fails
 until every function has one, and runs every example clip to check it still works.
+`tests/tutorial.test.ts` runs every lesson's solution (it must meet every goal within the
+lesson's tick budget) and starter (it must not), so a rules change that breaks a lesson fails.
 
 Positions are `[x, y]` tiles. `[0, 0]` is the top-left; `North` is up the screen.
 
 ## Next steps
 
-1. Goals per year (survive the winter, reach 20 bees), so each year is a run
-2. The honeycomb view inside the hive, ported from the concept demo
-3. More communication: `dance()` inside the hive
-4. Saving, settings and a Tauri desktop build
+All six phases are built: accounts, the server-run colony, the 5×5 world, raiding and health,
+wasps, and chat with a leaderboard. Still open:
+
+- Hosting, so outside players can join (the design doc compares options)
+- The wasp sprite's source and license (see CREDITS.md)
+- Balance for multiplayer: wild nests kill unguarded foragers that wander close
 
 ## Credits
 

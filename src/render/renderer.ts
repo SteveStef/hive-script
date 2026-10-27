@@ -1,12 +1,18 @@
 import beeSheetUrl from '../assets/bumble-bee.png';
-import { COLS, MOVE_TICKS, ROWS, SCENT_MAX, SENSE_RANGE, type Bee, type Dir, type Flower, type Season, type Tile, type World } from '../sim/world';
+import waspSheetUrl from '../assets/wasp.png';
+import type { ColonyView } from '../sim/view';
+import { COLS, keyTile, MOVE_TICKS, ROWS, SCENT_MAX, SENSE_RANGE, type Bee, type Dir, type Season, type Tile } from '../sim/world';
 import { INK, recolor } from './pixels';
-import { BUDS, FLOWER_SPOTS, makeGround, makeSkep, TILE, TINY } from './scenery';
+import { BUDS, FLOWER_SPOTS, makeGround, makeNest, makeSkep, TILE, TINY } from './scenery';
 
 // Elthen's "Bumble Bee Sprites" sheet: 4 rows (east, west, north, south) of 4 frames, 32x32 each.
 // The bee sits near (16, 14) in each frame and bobs on its own.
 const SHEET_ROW: Record<Dir, number> = { east: 0, west: 1, north: 2, south: 3 };
 const FRAME = 32;
+// The wasp sheet faces east, in 5 rows of 4 frames: hover, fly, sting, hit and death.
+// Flying west uses a mirrored copy; flying north or south keeps the side it last faced.
+const WASP_ROW = { hover: 0, fly: 1, sting: 2, hit: 3, death: 4 };
+const HIT_FRAMES = 18; // how long a stung unit shows its hit frames
 // scent colors; each scent name always gets the same one
 const SCENT_COLORS = ['180, 140, 255', '255, 107, 139', '95, 211, 224', '255, 216, 74', '255, 154, 61', '155, 227, 107'];
 
@@ -19,8 +25,9 @@ const ROLE_COLORS = ['#4FC3F7', '#FF5A6E', '#9B7BFF', '#2EC4B6', '#E6E6F0'];
 // underside and stripe edges show the role while the top half stays bumblebee yellow.
 const SHADED_BODY = ['#c6851e', '#ce6717'];
 
-/** The marker color for a role, or null for foragers. */
+/** The marker color for a role, or null for foragers and wasps (which have a sprite of their own). */
 export function roleColor(roleNames: string[], role: string): string | null {
+  if (role === 'wasp') return null;
   const i = roleNames.indexOf(role);
   return i > 0 ? ROLE_COLORS[(i - 1) % ROLE_COLORS.length] : null;
 }
@@ -50,8 +57,12 @@ interface Particle {
   color: string;
 }
 
+/** A bee as the renderer needs it: its body, whoever's it is. */
+type Unit = Omit<Bee, 'runner'>;
+
 export interface Placed {
-  bee: Bee;
+  bee: Unit;
+  mine: boolean; // this colony's bee, or another player's
   x: number;
   y: number; // ground position, in canvas pixels
   z: number; // height above the ground
@@ -62,11 +73,17 @@ export class Renderer {
   readonly height = ROWS * TILE;
   private readonly g: CanvasRenderingContext2D;
   private ground: HTMLCanvasElement | null = null;
-  private groundFlowers: Flower[] | null = null; // the flowers the ground was drawn for
+  private groundKey = ''; // the map, hives and flowers the ground was drawn for
   private readonly skep = makeSkep();
+  private readonly nest = makeNest();
+  private readonly colonyNest = makeNest(true);
   private readonly sheet = new Image();
+  private readonly waspSheet = new Image();
+  private waspWest: HTMLCanvasElement | null = null; // the wasp sheet mirrored, made once it loads
+  private readonly waspFacing = new Map<number, 'east' | 'west'>(); // the side each wasp last faced
+  private readonly hits = new Map<number, number>(); // unit id (0: a nest) -> the frame its hit flash ends
   private particles: Particle[] = [];
-  private ghosts: Ghost[] = [];
+  private ghosts: Ghost[] = []; // a ghost's role "wasp" draws the wasp's death frames
   private readonly weather = Array.from({ length: 48 }, () => ({ x: Math.random() * COLS * TILE, y: Math.random() * ROWS * TILE, phase: Math.random() * 6 }));
   private frame = 0;
   private roleNames: string[] = ['forager'];
@@ -77,10 +94,11 @@ export class Renderer {
     canvas.height = this.height;
     this.g = canvas.getContext('2d')!;
     this.sheet.src = beeSheetUrl;
+    this.waspSheet.src = waspSheetUrl;
   }
 
   /** Where a bee is right now, including how far along its current move it is (frac: 0..1 of a tick). */
-  place(world: World, bee: Bee, frac: number): Placed {
+  place(world: ColonyView, bee: Unit, frac: number, mine = true): Placed {
     let x = bee.x * TILE + 8;
     let y = bee.y * TILE + 8;
     let z = 6;
@@ -94,29 +112,45 @@ export class Renderer {
       z = 9;
     } else if (a?.kind === 'collect') {
       z = 4;
-    } else if (world.atHive(bee)) {
+    } else if (world.atHive(bee) || world.otherHives.some(h => h.x === bee.x && h.y === bee.y) || world.nests.some(n => n.x === bee.x && n.y === bee.y)) {
       z = 3;
     }
-    return { bee, x, y, z };
+    return { bee, x, y, z, mine };
   }
 
-  draw(world: World, frac: number, selectedId: number | null, hover: Tile | null): void {
+  draw(world: ColonyView, frac: number, selectedId: number | null, hover: Tile | null): void {
     const g = this.g;
     const t = world.tick + frac;
+    const o = world.origin;
     this.frame++;
     this.roleNames = world.roleNames;
+    if (this.frame % 600 === 0) for (const [id, until] of this.hits) if (until < this.frame) this.hits.delete(id);
     for (const e of world.events) {
       if (e.type === 'collect') this.burst(e.x * TILE + 8, e.y * TILE + 4);
-      if (e.type === 'death') this.ghosts.push({ role: world.findBee(e.id)?.role ?? 'forager', x: e.x * TILE + 8, y: e.y * TILE + 2, facing: e.facing, life: 90 });
-      if (e.type === 'lay' || e.type === 'hatch' || e.type === 'build') this.burst(world.hive.x * TILE + 8, world.hive.y * TILE + 6, '#FFFFFF');
+      if (e.type === 'death') this.ghosts.push({ role: e.role, x: e.x * TILE + 8, y: e.y * TILE + 2, facing: e.facing, life: 90 });
+      if (e.type === 'lay' || e.type === 'hatch' || e.type === 'build') this.burst(e.x * TILE + 8, e.y * TILE + 6, '#FFFFFF');
+      if (e.type === 'hit') {
+        this.hits.set(e.id, this.frame + HIT_FRAMES);
+        this.burst(e.x * TILE + 8, e.y * TILE + 2, e.id === 0 ? '#B8B2A4' : '#F04A3A');
+      }
+      if (e.type === 'steal') this.burst(e.x * TILE + 8, e.y * TILE + 4, '#FFC93A');
+      if (e.type === 'nest') for (let i = 0; i < 4; i++) this.burst(e.x * TILE + 8, e.y * TILE + 4, '#8E887C');
     }
 
-    // the leafy ground under the flowers moves with them, so it is redrawn when a new season blooms
-    if (world.flowers !== this.groundFlowers) {
-      this.ground = makeGround(world.flowers, world.hive);
-      this.groundFlowers = world.flowers;
+    // every hive on this map: this colony's and any other's (only one per map in practice)
+    const hives = [...(world.hive ? [world.hive] : []), ...world.otherHives].filter(h => h.x >= o.x && h.y >= o.y && h.x < o.x + COLS && h.y < o.y + ROWS);
+    // the leafy ground under the flowers moves with them, so it is redrawn when a new season blooms or the map changes
+    const groundKey = `${o.x},${o.y}|${hives.map(h => `${h.x},${h.y}`).join(';')}|${world.flowers.map(f => `${f.x},${f.y}`).join(';')}`;
+    if (groundKey !== this.groundKey) {
+      const local = (tile: Tile) => ({ x: tile.x - o.x, y: tile.y - o.y });
+      this.ground = makeGround(world.flowers.map(local), hives.map(local));
+      this.groundKey = groundKey;
     }
     g.drawImage(this.ground!, 0, 0);
+
+    // from here, drawing is in world positions: the map on screen starts at the origin
+    g.save();
+    g.translate(-o.x * TILE, -o.y * TILE);
     this.drawScents(world);
     if (hover) {
       g.fillStyle = 'rgba(255, 255, 255, 0.2)';
@@ -139,40 +173,53 @@ export class Renderer {
       });
     }
 
-    // Depth: the skep's dome rises over the tiles behind (north of) the hive. Bees back there are
-    // drawn first so the dome hides them; bees at or in front of the hive are drawn after it.
-    const skep = {
-      x: world.hive.x * TILE + 8 - (this.skep.width >> 1),
-      y: world.hive.y * TILE + 15 - this.skep.height,
+    // Depth: a skep's dome rises over the tiles behind (north of) its hive. Everything is drawn
+    // back to front, so the dome hides bees behind it and bees at or in front of it cover it.
+    const skeps = hives.map(h => ({
+      x: h.x * TILE + 8 - (this.skep.width >> 1),
+      y: h.y * TILE + 15 - this.skep.height,
       w: this.skep.width,
       h: this.skep.height,
-    };
-    const hiveLine = world.hive.y * TILE + 8;
-    const placed = world.bees.map(b => this.place(world, b, frac)).sort((a, b) => a.y - b.y);
-    const behind = placed.filter(p => p.y < hiveLine);
-    const front = placed.filter(p => p.y >= hiveLine);
+      line: h.y * TILE + 8,
+    }));
+    const placed = [...world.bees.map(b => this.place(world, b, frac)), ...world.visitors.map(b => this.place(world, b, frac, false))];
     const sheetReady = this.sheet.complete && this.sheet.naturalWidth > 0;
-
-    for (const p of behind) this.drawShadow(p, null);
-    for (const p of behind) this.drawBee(p, sheetReady, true);
-    g.drawImage(this.skep, skep.x, skep.y);
-    // a bee hidden behind the dome still shows faintly, so you can keep following it
+    const layers = [
+      ...placed.map(p => ({ y: p.y, draw: () => {
+        // shadows in front of a hive fall on the ground below the skep, never on the straw
+        const under = skeps.find(k => p.y >= k.line && Math.abs(p.x - (k.x + k.w / 2)) < k.w / 2 && p.y < k.y + k.h + 8);
+        this.drawShadow(p, under ? under.y + under.h + 1 : null);
+        this.drawBee(p, sheetReady, true);
+      } })),
+      ...skeps.map(k => ({ y: k.line - 0.5, draw: () => g.drawImage(this.skep, k.x, k.y) })),
+      ...world.nests.map(n => ({ y: n.y * TILE + 7.5, draw: () => {
+        const sprite = n.wild ? this.nest : this.colonyNest;
+        const x = n.x * TILE + 8 - (sprite.width >> 1);
+        const y = n.y * TILE + 15 - sprite.height;
+        g.drawImage(sprite, x, y);
+        if (n.health < n.maxHealth) this.drawHealth(n.x * TILE + 8, y - 3, n.health, n.maxHealth);
+      } })),
+    ].sort((a, b) => a.y - b.y);
+    for (const layer of layers) layer.draw();
+    // a bee hidden behind a dome still shows faintly, so you can keep following it
     g.globalAlpha = 0.4;
-    for (const p of behind) {
-      const top = p.y - p.z - 14;
-      if (p.x + 8 > skep.x && p.x - 8 < skep.x + skep.w && top < skep.y + skep.h && top + 22 > skep.y) this.drawBee(p, sheetReady, false);
+    for (const k of skeps) {
+      for (const p of placed) {
+        const top = p.y - p.z - 14;
+        if (p.y < k.line && p.x + 8 > k.x && p.x - 8 < k.x + k.w && top < k.y + k.h && top + 22 > k.y) this.drawBee(p, sheetReady, false);
+      }
     }
     g.globalAlpha = 1;
-    // shadows in front of the hive fall on the ground below the skep, never on the straw
-    for (const p of front) this.drawShadow(p, Math.abs(p.x - (skep.x + skep.w / 2)) < skep.w / 2 ? skep.y + skep.h + 1 : null);
-    for (const p of front) this.drawBee(p, sheetReady, true);
 
     // fallen bees float up and fade
     this.ghosts = this.ghosts.filter(gh => --gh.life > 0);
     for (const gh of this.ghosts) {
       gh.y -= 0.2;
       g.globalAlpha = (gh.life / 90) * 0.7;
-      if (sheetReady) g.drawImage(this.sheetFor(gh.role), 0, SHEET_ROW[gh.facing] * FRAME, FRAME, FRAME, Math.round(gh.x) - 16, Math.round(gh.y) - 14, FRAME, FRAME);
+      if (gh.role === 'wasp') {
+        const fr = Math.min(3, Math.floor((90 - gh.life) / 8));
+        this.drawWaspFrame(gh.facing === 'west' ? 'west' : 'east', WASP_ROW.death, fr, Math.round(gh.x), Math.round(gh.y));
+      } else if (sheetReady) g.drawImage(this.sheetFor(gh.role), 0, SHEET_ROW[gh.facing] * FRAME, FRAME, FRAME, Math.round(gh.x) - 16, Math.round(gh.y) - 14, FRAME, FRAME);
       g.globalAlpha = 1;
     }
 
@@ -184,12 +231,15 @@ export class Renderer {
       g.fillStyle = p.color;
       g.fillRect(Math.round(p.x), Math.round(p.y), 1, 1);
     }
+    g.restore();
 
     this.drawSeason(world.season);
 
-    const sel = placed.find(p => p.bee.id === selectedId);
-    if (sel) this.drawPath(sel);
+    const sel = placed.find(p => p.mine && p.bee.id === selectedId);
     if (sel) {
+      g.save();
+      g.translate(-o.x * TILE, -o.y * TILE);
+      this.drawPath(sel);
       // what the bee can see, then a pointer above it
       g.fillStyle = 'rgba(255, 255, 255, 0.55)';
       const cx = sel.bee.x * TILE + 8;
@@ -207,6 +257,7 @@ export class Renderer {
       g.fillStyle = '#FFFFFF';
       g.fillRect(x - 1, y, 3, 1);
       g.fillRect(x, y + 1, 1, 1);
+      g.restore();
     }
   }
 
@@ -214,11 +265,10 @@ export class Renderer {
    * Scent marks: a tinted tile with an outline, fading with the scent. A tile with several
    * scents nests their outlines, strongest outermost.
    */
-  private drawScents(world: World): void {
+  private drawScents(world: ColonyView): void {
     const g = this.g;
     for (const key of world.scents.keys()) {
-      const x = key % COLS;
-      const y = Math.floor(key / COLS);
+      const { x, y } = keyTile(key);
       world.scentsAt(x, y).slice(0, 3).forEach(([name, strength], i) => {
         const rgb = SCENT_COLORS[scentHash(name) % SCENT_COLORS.length];
         const a = strength / SCENT_MAX;
@@ -294,19 +344,55 @@ export class Renderer {
     g.fillRect(x - (w >> 1) + 2, y + 2, w - 4, 1);
   }
 
-  /** The bee itself; with extras, also the pollen it carries and the hungry warning. */
+  /** One frame of the wasp sheet, facing east or (mirrored) west, centered like a bee. */
+  private drawWaspFrame(side: 'east' | 'west', row: number, fr: number, x: number, y: number): void {
+    if (!this.waspSheet.complete || !this.waspSheet.naturalWidth) return;
+    if (side === 'west' && !this.waspWest) {
+      const c = document.createElement('canvas');
+      c.width = this.waspSheet.width;
+      c.height = this.waspSheet.height;
+      const cg = c.getContext('2d')!;
+      cg.scale(-1, 1);
+      cg.drawImage(this.waspSheet, -c.width, 0);
+      this.waspWest = c;
+    }
+    const sheet = side === 'west' ? this.waspWest! : this.waspSheet;
+    const col = side === 'west' ? 3 - fr : fr;
+    this.g.drawImage(sheet, col * FRAME, row * FRAME, FRAME, FRAME, x - 16, y - 16, FRAME, FRAME);
+  }
+
+  /** A small bar over a hurt unit or nest: green to red as health runs out. */
+  private drawHealth(cx: number, top: number, health: number, max: number): void {
+    const g = this.g;
+    const w = 10;
+    const fill = Math.max(1, Math.round((health / max) * (w - 2)));
+    g.fillStyle = INK;
+    g.fillRect(cx - (w >> 1), top, w, 3);
+    g.fillStyle = health / max > 0.5 ? '#7FD35B' : health / max > 0.25 ? '#F2B632' : '#F04A3A';
+    g.fillRect(cx - (w >> 1) + 1, top + 1, fill, 1);
+  }
+
+  /** The bee itself; with extras, also the pollen it carries, its health when hurt, and the hungry warning. */
   private drawBee(p: Placed, sheetReady: boolean, extras: boolean): void {
     const g = this.g;
     const x = Math.round(p.x);
     const y = Math.round(p.y - p.z);
-    if (sheetReady) {
+    const a = p.bee.action;
+    if (p.bee.role === 'wasp') {
+      if (p.bee.facing === 'east' || p.bee.facing === 'west') this.waspFacing.set(p.bee.id, p.bee.facing);
+      const hit = (this.hits.get(p.bee.id) ?? 0) > this.frame;
+      const row = hit ? WASP_ROW.hit : a?.kind === 'sting' ? WASP_ROW.sting : a?.kind === 'move' && a.moving ? WASP_ROW.fly : WASP_ROW.hover;
       const fr = Math.floor((this.frame + p.bee.id * 5) / 6) % 4;
-      g.drawImage(this.sheetFor(p.bee.role), fr * FRAME, SHEET_ROW[p.bee.facing] * FRAME, FRAME, FRAME, x - 16, y - 14, FRAME, FRAME);
+      this.drawWaspFrame(this.waspFacing.get(p.bee.id) ?? 'east', row, fr, x, y);
+    } else if (sheetReady) {
+      const fr = Math.floor((this.frame + p.bee.id * 5) / 6) % 4;
+      g.drawImage(p.mine ? this.sheetFor(p.bee.role) : this.sheet, fr * FRAME, SHEET_ROW[p.bee.facing] * FRAME, FRAME, FRAME, x - 16, y - 14, FRAME, FRAME);
     } else {
       g.fillStyle = '#F5C127';
       g.fillRect(x - 4, y - 4, 8, 8);
     }
     if (!extras) return;
+    if (p.bee.health < p.bee.maxHealth) this.drawHealth(x, y - 17, p.bee.health, p.bee.maxHealth);
     if (p.bee.carrying > 0) {
       // pollen on the legs
       g.fillStyle = '#F28C28';

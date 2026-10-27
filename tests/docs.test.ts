@@ -26,7 +26,7 @@ describe('docs page', () => {
         const world = new World(demoPrograms(d), 1, demoOptions(d));
         for (let i = 0; i < (d.length ?? 600); i++) world.step();
         expect(world.error).toBeNull();
-        expect(world.over).toBeNull();
+        expect(world.colony.over).toBeNull();
       });
     } else {
       it(`the ${name} example runs`, () => {
