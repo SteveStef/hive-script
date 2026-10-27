@@ -43,6 +43,30 @@ function colonyGlobals(colony: Colony): Record<string, Value> {
       const role = roleName(colony, 'role_count', args[0], line);
       return colony.bees.filter(b => b.role === role).length;
     }),
+    // distance() counts the way a bee really flies: around hedges, through their gates
+    distance: builtin('distance', (args, line) => {
+      expectArgs('distance', args, 2, line);
+      const [a, b] = args.map(v => {
+        if (Array.isArray(v) && v.length === 2 && typeof v[0] === 'number' && typeof v[1] === 'number') return v as number[];
+        throw new ScriptError(`distance() needs two positions like [3, 5], not ${format(v, true)}.`, line);
+      });
+      const tile = (p: number[]) => Number.isInteger(p[0]) && Number.isInteger(p[1]) && world.inside(p[0], p[1]);
+      if (tile(a) && tile(b)) return world.travel({ x: a[0], y: a[1] }, { x: b[0], y: b[1] });
+      return Math.abs(a[0] - b[0]) + Math.abs(a[1] - b[1]);
+    }),
+    blocked: builtin('blocked', (args, line) => {
+      expectArgs('blocked', args, 1, line);
+      const v = args[0];
+      if (!(Array.isArray(v) && v.length === 2 && Number.isInteger(v[0]) && Number.isInteger(v[1]))) {
+        throw new ScriptError(`blocked() needs a position like [3, 5], not ${format(v, true)}.`, line);
+      }
+      return world.blocked({ x: v[0] as number, y: v[1] as number });
+    }),
+    shielded: builtin('shielded', (args, line) => {
+      expectArgs('shielded', args, 1, line);
+      const [x, y] = position(colony, 'shielded', args[0], line);
+      return world.shieldedAt({ x, y });
+    }),
     nest_pos: builtin('nest_pos', (args, line) => {
       expectArgs('nest_pos', args, 0, line);
       return colony.nest ? [colony.nest.x, colony.nest.y] : null;
@@ -134,10 +158,9 @@ export function beeGlobals(colony: Colony, bee: Bee): Record<string, Value> {
     steal: action('steal'),
     sting: builtin('sting', (args, line) => {
       expectArgs('sting', args, 1, line);
-      if (!wasp) throw new ScriptError('Only wasps can sting. The queen lays them with lay("wasp"), and they run wasp.bee.', line);
       const [x, y] = position(colony, 'sting', args[0], line);
       if (Math.abs(x - bee.x) + Math.abs(y - bee.y) !== 1) {
-        throw new ScriptError(`sting() reaches only a tile right next to the wasp, and [${x}, ${y}] isn't next to [${bee.x}, ${bee.y}].`, line);
+        throw new ScriptError(`sting() reaches only a tile right next to the ${wasp ? 'wasp' : 'bee'}, and [${x}, ${y}] isn't next to [${bee.x}, ${bee.y}].`, line);
       }
       return act('sting', [x, y]);
     }),
@@ -147,6 +170,21 @@ export function beeGlobals(colony: Colony, bee: Bee): Record<string, Value> {
     }),
 
     // senses about this bee: these answer instantly
+    gates: builtin('gates', (args, line) => {
+      expectArgs('gates', args, 0, line);
+      return world.gatesOf(colony.map, bee).map(t => [t.x, t.y]);
+    }),
+    random_spot: builtin('random_spot', (args, line) => {
+      expectArgs('random_spot', args, 0, line);
+      // an open tile on the colony's own map, for exploring
+      const x0 = colony.map.x * COLS;
+      const y0 = colony.map.y * ROWS;
+      for (let i = 0; i < 20; i++) {
+        const t = { x: x0 + Math.floor(world.rng() * COLS), y: y0 + Math.floor(world.rng() * ROWS) };
+        if (!world.blocked(t)) return [t.x, t.y];
+      }
+      return [colony.hive.x, colony.hive.y];
+    }),
     role: builtin('role', () => bee.role),
     get_pos: builtin('get_pos', () => [bee.x, bee.y]),
     hive_pos: builtin('hive_pos', () => [colony.hive.x, colony.hive.y]),
@@ -197,6 +235,10 @@ export function queenGlobals(colony: Colony): Record<string, Value> {
         throw new ScriptError(`The nest has to be on your own map: x from ${x0} to ${x0 + COLS - 1}, y from ${y0} to ${y0 + ROWS - 1}.`, line);
       }
       return act('nest', [x, y]);
+    }),
+    gates: builtin('gates', (args, line) => {
+      expectArgs('gates', args, 0, line);
+      return colony.world.gatesOf(colony.map, colony.hive).map(t => [t.x, t.y]);
     }),
     lay: builtin('lay', (args, line) => {
       if (args.length > 1) throw new ScriptError(`lay() takes a role's name, or nothing for a forager, but got ${args.length} values.`, line);

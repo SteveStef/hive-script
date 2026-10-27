@@ -70,3 +70,53 @@ export function recolor(src: CanvasImageSource & { width: number; height: number
   g.putImageData(image, 0, 0);
   return c;
 }
+
+/** Returns a copy of an image with every opaque pixel's color passed through a function ('#rrggbb' in and out). */
+export function remap(src: CanvasImageSource & { width: number; height: number }, to: (hex: string) => string): HTMLCanvasElement {
+  const c = sprite(src.width, src.height, g => g.drawImage(src, 0, 0));
+  const g = c.getContext('2d')!;
+  const image = g.getImageData(0, 0, c.width, c.height);
+  const d = image.data;
+  const seen = new Map<string, string>();
+  for (let i = 0; i < d.length; i += 4) {
+    if (!d[i + 3]) continue;
+    const from = '#' + [d[i], d[i + 1], d[i + 2]].map(v => v.toString(16).padStart(2, '0')).join('');
+    let hex = seen.get(from);
+    if (!hex) seen.set(from, (hex = to(from)));
+    d[i] = parseInt(hex.slice(1, 3), 16);
+    d[i + 1] = parseInt(hex.slice(3, 5), 16);
+    d[i + 2] = parseInt(hex.slice(5, 7), 16);
+  }
+  g.putImageData(image, 0, 0);
+  return c;
+}
+
+/**
+ * Returns a copy of a sprite sheet with a 1px edge around each frame's sprite. Each size x size
+ * frame is edged on its own, so no edge spills into the next frame.
+ */
+export function edgedSheet(src: CanvasImageSource & { width: number; height: number }, size: number, color: string): HTMLCanvasElement {
+  const c = sprite(src.width, src.height, g => g.drawImage(src, 0, 0));
+  const g = c.getContext('2d')!;
+  const data = g.getImageData(0, 0, c.width, c.height).data;
+  g.fillStyle = color;
+  for (let fy = 0; fy < c.height; fy += size) {
+    for (let fx = 0; fx < c.width; fx += size) {
+      const on = (x: number, y: number) => x >= 0 && y >= 0 && x < size && y < size && data[((fy + y) * c.width + fx + x) * 4 + 3] > 40;
+      for (let y = 0; y < size; y++) {
+        for (let x = 0; x < size; x++) {
+          if (!on(x, y) && (on(x - 1, y) || on(x + 1, y) || on(x, y - 1) || on(x, y + 1))) g.fillRect(fx + x, fy + y, 1, 1);
+        }
+      }
+    }
+  }
+  return c;
+}
+
+/** Returns a copy of an image flipped left to right. */
+export function mirrored(src: CanvasImageSource & { width: number; height: number }): HTMLCanvasElement {
+  return sprite(src.width, src.height, g => {
+    g.scale(-1, 1);
+    g.drawImage(src, -src.width, 0);
+  });
+}

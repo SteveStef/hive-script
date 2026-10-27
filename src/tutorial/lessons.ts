@@ -51,7 +51,7 @@ const meadow = (flowers: [number, number][], options: WorldOptions = {}) => (pro
  */
 function practice(flowers: [number, number][], setup: (world: World) => void, rival?: { programs: Programs; honey: number }) {
   return (programs: Programs) => {
-    const world = new World(null, 1, { maps: [2, 1], flowers });
+    const world = new World(null, 1, { maps: [2, 1], flowers, hedges: true });
     world.found(programs, { x: 0, y: 0 }, null);
     if (rival) world.found(rival.programs, { x: 1, y: 0 }, 'rival').honey = rival.honey;
     setup(world);
@@ -110,7 +110,7 @@ export const LESSONS: Lesson[] = [
     solution: { forager: 'move_to([5, 8])\ncollect()\ncollect()\ncollect()\ngo_home()\ndeposit()\n' },
     world: meadow(NEAR),
     goals: [{ text: '3 honey in the hive', check: w => made(w) >= 3 }],
-    hints: ['Call collect() three times on the flower to fill up.', 'Then go_home() and deposit(). Watch the Honey count under the meadow (Colony tab).'],
+    hints: ['Call collect() three times on the flower to fill up.', 'Then go_home() and deposit(). Watch the Honey count under the meadow (Colony tab); the hive grows a box for every 50 honey.'],
     recap: 'collect(), go_home(), deposit(): the loop at the heart of every colony.',
     budget: 120,
   },
@@ -165,7 +165,8 @@ export const LESSONS: Lesson[] = [
     title: 'The queen',
     intro: `
       <p>One bee won't go far. The queen runs <b>queen.bee</b>: she never leaves the hive, and ${fn('lay')} spends 10 honey on an egg that hatches into a worker after 300 ticks.</p>
-      <p>Every bee and egg needs a cell of comb. ${fn('space')} says how many are free, and ${fn('honey')} what's in store. ${code('lay()')} returns False when she can't afford it.</p>
+      <p>Every bee and egg needs a cell of comb. ${fn('space')} says how many are free, and ${fn('honey')} what's in store. ${code('lay()')} returns False when she can't afford it.
+      Each egg shows in the comb in front of the hive: an egg, then a grub, then a cap just before it hatches.</p>
       <p>The forager already works. <b>Do this:</b> grow the colony to 3 bees.</p>`,
     tabs: ['queen', 'forager'],
     starter: { queen: '# queen.bee: the queen stays in the hive and decides when to lay.\nwhile True:\n    wait(60)\n', forager: FORAGER },
@@ -298,9 +299,11 @@ export const LESSONS: Lesson[] = [
     topic: 'Multiplayer',
     title: 'A world of maps',
     intro: `
-      <p>Multiplayer is a world of 5 × 5 maps, each 20 × 12 tiles, shared by up to 25 players. You found your colony on a free map from the <b>World map</b>,
+      <p>Multiplayer is a world of 5 × 5 maps, each 20 × 12 tiles, shared by up to 25 players. You found your colony by picking a free map on the <b>World map</b> and clicking where its hive goes (anywhere with no flowers under it),
       press <b>Deploy</b> to send your scripts (bees start the new code at once), and the colony keeps working while you're away. The <b>Chat</b> and <b>Leaders</b> tabs sit beside the log.</p>
-      <p>Positions are one big grid: map ${code('[1, 0]')} starts at x 20. Borders are open, so bees forage on neighbors' maps. ${fn('my_map')} and ${fn('map_at', 'position')} give map numbers.
+      <p>Positions are one big grid: map ${code('[1, 0]')} starts at x 20. ${fn('my_map')} and ${fn('map_at', 'position')} give map numbers.
+      A <b>hedgerow</b> runs along every border and around the world, and nothing flies through it. Each border has one <b>gate</b>, two tiles wide:
+      ${fn('move_to')} finds it by itself, ${fn('distance', 'a, b')} counts the way through it, and ${fn('gates')} lists your map's gates, nearest first.
       This practice world has two maps; use the arrows above the meadow to look next door.</p>
       <p><b>Do this:</b> your map has no flowers. Send a bee to collect on the map east of yours.</p>`,
     tabs: ['forager'],
@@ -308,8 +311,11 @@ export const LESSONS: Lesson[] = [
     solution: { forager: 'print("our map:", my_map())\nmove_to([22, 6])\nwhile True:\n    f = nearest_flower()\n    move_to(f)\n    collect()\n    go_home()\n    deposit()\n' },
     world: practice([[23, 5], [24, 5], [23, 6], [24, 7], [25, 6]], () => {}),
     goals: [{ text: 'A bee collects on map [1, 0]', check: w => w.flowers.some(f => f.x >= 20 && f.nectar < f.max) }],
-    hints: ['Map [1, 0] covers x 20 to 39. Fly there with move_to([22, 6]), then nearest_flower() sees its flowers.'],
-    recap: 'One grid of positions, open borders: neighbors share the meadow, and the world keeps running without you.',
+    hints: [
+      'Map [1, 0] covers x 20 to 39. Fly there with move_to([22, 6]): the bee goes out through the hedge\'s gate on its own. Then nearest_flower() sees the flowers there.',
+      'print(gates()) shows where the gates are. Hover the meadow: hedge tiles say "hedgerow".',
+    ],
+    recap: 'One grid of positions, hedges with a gate on every border: neighbors share the meadow through the gates, and the world keeps running without you.',
     budget: 400,
   },
   {
@@ -319,7 +325,8 @@ export const LESSONS: Lesson[] = [
     intro: `
       <p>Honey can be taken. A bee at another colony's hive can ${fn('steal')} as much of its honey as it can carry, and ${fn('deposit')} it at home.
       ${fn('owner_at', 'position')} says whose hive or bee is on a tile.</p>
-      <p>The rival's hive is at ${code('[22, 6]')}, full of honey, with no guards. <b>Do this:</b> bring 5 stolen honey home.</p>`,
+      <p>In multiplayer a new colony is protected for its first 24 hours: nobody can raid or sting it, and ${fn('shielded', 'position')} tells you so.
+      Attacking another player ends your own protection early. Other players' bees and wasps have a red edge, so you can tell them from yours. The rival's hive here is at ${code('[22, 6]')}, full of honey, with no guards and no protection. <b>Do this:</b> bring 5 stolen honey home.</p>`,
     tabs: ['forager'],
     starter: { forager: 'print("[22, 6] belongs to", owner_at([22, 6]))\nwhile True:\n    wait(100)\n' },
     solution: { forager: 'while True:\n    move_to([22, 6])\n    steal()\n    go_home()\n    deposit()\n' },
@@ -340,7 +347,9 @@ export const LESSONS: Lesson[] = [
       <p>The rival's bees are raiding <i>you</i> now. Defense is code: <b>wasps</b>. They don't come cheap: first the colony saves up 150 honey,
       and the queen builds its wasp nest with ${fn('build_nest', '[x, y]')} on a free tile of your map. Then ${code('lay("wasp")')} raises wasps, 30 honey each; they hatch at the nest, live there (no comb needed), and run <b>wasp.bee</b>.</p>
       <p>Wasps have 30 health (bees 10), can't collect, and ${fn('sting', 'position')} an enemy on the tile right next to them for 5 damage. ${fn('enemies_near')} lists enemies in sight.
-      A raider has to land on your hive for 10 ticks to steal: a wasp standing beside the hive has time to sting twice.</p>
+      A raider has to land on your hive for 10 ticks to steal: a wasp standing beside the hive has time to sting twice.
+      Worker bees can ${fn('sting', 'position')} too, but only once: it does 10 damage, and the bee dies doing it.
+      While a raider sits on your hive, a red banner over the meadow says so. Wasps grow old like bees, so in a real game the queen keeps replacing them.</p>
       <p><b>Do this:</b> you've saved 200 honey. Build a nest, lay a wasp, and make wasp.bee guard the hive until it stings a raider to death.</p>`,
     tabs: ['queen', 'wasp'],
     starter: { queen: 'while True:\n    wait(100)\n', wasp: '# wasp.bee: every wasp runs this.\nwhile True:\n    wait(100)\n' },

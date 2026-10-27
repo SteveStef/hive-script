@@ -3,10 +3,11 @@ import { DEFAULT_FORAGER, DEFAULT_QUEEN, DEFAULT_SHARED } from '../src/defaultSc
 import { parse } from '../src/lang/parser';
 import {
   BEE_COST, BUILD_COST, HATCH_TICKS, LAY_TICKS, LIFESPAN_MAX, MARK_TICKS, MAX_ENERGY, MOVE_TICKS, SCENT_LIFE, SCENT_MAX,
-  BLOOMS, bloom, COLS, ROWS, SEASON_TICKS, SHARED_LINE_BASE, START_BEES, START_COMB, World,
+  BLOOMS, bloom, bloomMap, COLS, hedgeLayout, HIVE_SPOT, inFootprint, ROWS, SEASON_TICKS, SHARED_LINE_BASE, START_BEES, START_COMB, tileKey, World,
   BEE_HEALTH, HATCH_TICKS as HATCH, NEST_BUILD_TICKS, NEST_COST, NEST_HEALTH, NEST_WASPS, STING_DAMAGE, STING_TICKS, WASP_CAPACITY, WASP_COST, WASP_HEALTH,
 } from '../src/sim/world';
 import { DEFAULT_WASP } from '../src/defaultScript';
+import { toJson } from '../src/sim/view';
 
 const IDLE_QUEEN = 'while True:\n    wait(1000)';
 const GREEDY_QUEEN = 'while True:\n    if not lay():\n        wait(30)';
@@ -70,12 +71,16 @@ describe('the default colony', () => {
       expect(world.colony.over).toBeNull();
       expect(world.colony.bees.length).toBeGreaterThan(0);
       expect(world.colony.totalHoney).toBeGreaterThan(200);
-      expect(world.colony.comb).toBeGreaterThan(START_COMB);
+      expect(world.colony.bees.length).toBeGreaterThan(START_BEES);
+      expect(world.colony.honey).toBeGreaterThan(50); // the starting scripts never build comb: honey piles up for the player to spend
     });
   }
 
-  it('a queen who lays whenever she can starves the colony in its first winter', () => {
-    const world = simulate(makeWorld(DEFAULT_FORAGER, GREEDY_QUEEN), year);
+  it('a queen who lays whenever she can starves a growing colony in its first winter', () => {
+    // the starting forager, plus building comb whenever the hive is full, so the colony can keep growing
+    const builder = DEFAULT_FORAGER.replace('        eat()  # top up before the next trip', '        eat()  # top up before the next trip\n        if space() == 0:\n            build()');
+    expect(builder).not.toBe(DEFAULT_FORAGER);
+    const world = simulate(makeWorld(builder, GREEDY_QUEEN), year);
     expect(world.colony.over).not.toBeNull();
     expect(world.colony.fallen.some(b => b.death?.cause === 'starved')).toBe(true);
   });
@@ -564,14 +569,52 @@ describe('health, raids and wasps', () => {
     expect(printed(world)).toEqual(['True', `wasp ${WASP_HEALTH} ${WASP_CAPACITY}`]);
   });
 
-  it("wasps can't collect, and only wasps can sting", () => {
+  it("wasps can't collect, and a sting that hits nothing misses", () => {
     const wasp = new World(programs('wait(1000)', IDLE_QUEEN, 'collect()'), 1, { bees: 0, wasps: 1 });
     simulate(wasp, 5);
     expect(wasp.error?.message).toMatch(/Wasps can't collect nectar/);
-    const bee = simulate(makeWorld('sting([3, 6])'), 5);
-    expect(bee.error?.message).toMatch(/Only wasps can sting/);
+    const bee = simulate(makeWorld('print(sting([3, 6]))\nwhile True:\n    wait(100)'), 20);
+    expect(printed(bee)).toEqual(['False']); // nothing there: the bee keeps its sting, and its life
+    expect(bee.colony.bees).toHaveLength(1);
     const far = new World(programs('wait(1000)', IDLE_QUEEN, 'sting([9, 9])'), 1, { bees: 0, wasps: 1 });
     expect(simulate(far, 5).error?.message).toMatch(/right next to the wasp/);
+  });
+
+  it("a bee's one sting kills an enemy bee, and the bee dies doing it, leaving a danger scent", () => {
+    const world = grid();
+    const a = world.found(programs('move_to([22, 6])\nwhile True:\n    wait(100)'), { x: 1, y: 0 }, 'ada'); // a raider on its way to [22, 6]
+    const b = world.found(programs('move_to([21, 6])\nwhile True:\n    e = enemies_near()\n    if e and distance(e[0], get_pos()) == 1:\n        sting(e[0])\n    else:\n        wait(5)'), { x: 0, y: 0 }, 'bo');
+    a.bees[0].x = 25; // the raider starts on its own map, a few tiles off
+    b.bees[0].x = 20; // and the defender one tile from its post
+    simulate(world, 120);
+    expect(a.fallen[0].death?.cause).toBe('stung');
+    expect(a.fallen[0].health).toBe(0); // one sting: 10 damage, a bee's whole health
+    expect(b.fallen[0].death?.cause).toBe('last sting');
+    expect(b.bees).toHaveLength(0);
+    expect(b.scentsAt(21, 6).map(([name]) => name)).toEqual(['danger']);
+    expect(raids(b)).toContain("Stung ada's bee #" + a.fallen[0].id + ' and died doing it: a bee stings only once. Its sting did 10 damage.');
+    expect(raids(a).some(l => l.startsWith(`Stung to death at [22, 6] by bo's bee #${b.fallen[0].id}`))).toBe(true);
+    expect(b.kills).toBe(1);
+  });
+
+  it("a bee's sting takes 10 off a wasp; bees can't sting nests", () => {
+    const world = grid();
+    const a = world.found(programs('while True:\n    wait(100)'), { x: 1, y: 0 }, 'ada');
+    const b = world.found(programs('move_to([21, 6])\nwhile True:\n    e = enemies_near()\n    if e and distance(e[0], get_pos()) == 1:\n        sting(e[0])\n    else:\n        wait(5)'), { x: 0, y: 0 }, 'bo');
+    const raider = a.bees[0];
+    raider.role = 'wasp';
+    raider.health = raider.maxHealth = 30;
+    [raider.x, raider.y] = [22, 6];
+    b.bees[0].x = 20;
+    simulate(world, 60);
+    expect(raider.health).toBe(20);
+    expect(b.bees).toHaveLength(0);
+
+    const nest = new World(programs('move_to([8, 6])\nprint(sting([9, 6]))\nwhile True:\n    wait(100)'), 1, { nests: [[9, 6]], nestWasps: 0 });
+    simulate(nest, 120);
+    expect(printed(nest)).toEqual(['False']); // a nest is a wasp's job
+    expect(nest.nests[0].health).toBe(60);
+    expect(nest.colony.bees).toHaveLength(1);
   });
 
   it("a wasp stings an enemy bee to death; both colonies' logs tell it", () => {
@@ -715,5 +758,247 @@ describe("a colony's wasp nest", () => {
     const back = World.restore(programs(IDLE_QUEEN), JSON.parse(JSON.stringify(world.save())));
     expect(back.colony.nest).toEqual(world.colony.nest);
     expect(back.ownerAt({ x: 8, y: 5 })).toBe('you');
+  });
+});
+
+describe('hedgerows between maps', () => {
+  const programs = (forager: string, queen = IDLE_QUEEN) => ({ forager: parse(forager), queen: parse(queen), shared: SHARED });
+  const said = (c: { log: { text: string; tone?: string }[] }) => c.log.filter(l => !l.tone).map(l => l.text);
+  const hedged = (seed = 5) => new World(null, seed, { maps: [5, 5], hedges: true, haltOnError: false });
+
+  it('fence every border and the world, with one 2-tile gate per inner border, away from the corners', () => {
+    const { hedges, gates } = hedgeLayout(5, [5, 5]);
+    const W = 5 * COLS;
+    const H = 5 * ROWS;
+    for (let i = 0; i < W; i++) expect(hedges.has(tileKey(i, 0)) && hedges.has(tileKey(i, H - 1))).toBe(true);
+    for (let i = 0; i < H; i++) expect(hedges.has(tileKey(0, i)) && hedges.has(tileKey(W - 1, i))).toBe(true);
+    expect(gates).toHaveLength(2 * (4 * 5 + 5 * 4)); // 40 inner borders, 2 tiles each
+    for (const g of gates) {
+      const across = g.x % COLS === 0 && g.y % ROWS !== 0; // a gate in a vertical border
+      const along = across ? g.y % ROWS : g.x % COLS;
+      expect(along >= 2 && along <= (across ? ROWS : COLS) - 3).toBe(true);
+    }
+    // every corner where hedges cross stays solid
+    for (let r = 0; r <= 5; r++) for (let c = 0; c <= 5; c++) {
+      const x = Math.min(c * COLS, W - 1);
+      const y = Math.min(r * ROWS, H - 1);
+      expect(hedges.has(tileKey(x, y))).toBe(true);
+    }
+    expect(new World(null, 5).hedges.size).toBe(0); // single player has none
+  });
+
+  it('never grow over flowers, hives or nests', () => {
+    const world = hedged();
+    world.found(programs(IDLE_QUEEN), { x: 3, y: 4 }, 'ada');
+    for (const f of world.flowers) expect(world.blocked(f)).toBe(false);
+    expect(world.blocked(world.colony.hive)).toBe(false);
+    const nests = new World(null, 9, { maps: [5, 5], hedges: true, nests: 3 });
+    for (const n of nests.nests) expect(nests.blocked(n)).toBe(false);
+  });
+
+  it('move_to() finds the gate, and distance() counts the way through it', () => {
+    const world = hedged();
+    const map = { x: 1, y: 1 };
+    const c = world.found(programs('print(distance(get_pos(), [45, 17]), distance(get_pos(), [25, 17]))\nprint(move_to([45, 17]), get_pos())\nwhile True:\n    wait(100)'), map, 'ada');
+    const gate = world.gatesOf(map, c.hive).find(g => g.x === 40)!; // the east border's gate
+    const route = world.plan(c.hive, { x: 45, y: 17 });
+    expect(route.some(t => t.x === 40 && world.gateTiles.some(g => g.x === t.x && g.y === t.y))).toBe(true);
+    expect(route.every(t => !world.blocked(t))).toBe(true);
+    simulate(world, route.length * MOVE_TICKS + 20);
+    const straight = Math.abs(45 - c.hive.x) + Math.abs(17 - c.hive.y);
+    const [far, near] = said(c)[0].split(' ').map(Number);
+    expect(far).toBe(route.length);
+    expect(far).toBeGreaterThanOrEqual(straight);
+    expect(near).toBe(Math.abs(25 - c.hive.x) + Math.abs(17 - c.hive.y)); // open ground: just across plus down
+    expect(said(c)[1]).toBe('True [45, 17]');
+    expect(gate).toBeDefined();
+  });
+
+  it("move() into a hedge bumps; move_to() onto one says False; blocked() and gates() answer", () => {
+    const world = hedged();
+    const c = world.found(programs('move_to([21, 18])\nprint(move(West))\nprint(move_to([20, 12]), blocked([20, 12]), blocked([25, 18]))\nprint(gates())\nwhile True:\n    wait(100)'), { x: 1, y: 1 }, 'ada');
+    simulate(world, 200);
+    const [bump, onto, list] = said(c);
+    expect(bump).toBe('False');
+    expect(onto).toBe('False True False');
+    const expected = world.gatesOf({ x: 1, y: 1 }, { x: 21, y: 18 }).map(t => `[${t.x}, ${t.y}]`).join(', ');
+    expect(list).toBe(`[${expected}]`);
+    expect(world.gatesOf({ x: 1, y: 1 }, { x: 21, y: 18 })).toHaveLength(8); // four borders, two tiles each
+  });
+
+  it('wild wasps never stand in a hedge, and save and restore keeps the hedges', () => {
+    const world = new World(programs(IDLE_QUEEN), 3, { maps: [5, 5], hedges: true, nests: 3, home: true });
+    for (let t = 0; t < 2000; t++) {
+      world.step();
+      for (const n of world.nests) for (const w of n.wasps) expect(world.blocked(w)).toBe(false);
+    }
+    const back = World.restore(programs(IDLE_QUEEN), JSON.parse(JSON.stringify(world.save())));
+    expect([...back.hedges].sort()).toEqual([...world.hedges].sort());
+    expect(back.gateTiles).toEqual(world.gateTiles);
+  });
+});
+
+describe('protecting new colonies, and wild wasps keeping to their map', () => {
+  const programs = (forager: string, queen = IDLE_QUEEN, wasp = IDLE_QUEEN) => ({ forager: parse(forager), queen: parse(queen), wasp: parse(wasp), shared: SHARED });
+  const said = (c: { log: { text: string; tone?: string }[] }) => c.log.filter(l => !l.tone).map(l => l.text);
+  const grid = () => new World(null, 5, { maps: [5, 5], haltOnError: false });
+
+  it("can't be raided: steal() takes nothing, and shielded() says so", () => {
+    const world = new World(programs('print(shielded([12, 6]))\nmove_to([12, 6])\nprint(steal())\nwhile True:\n    wait(100)'), 1, {
+      rival: { x: 12, y: 6, honey: 20, owner: 'rival', shielded: true },
+    });
+    simulate(world, 120);
+    expect(said(world.colony)).toEqual(['True', '0']);
+    expect(world.colonies[1].honey).toBe(20);
+  });
+
+  it("can't be stung, isn't an enemy, and wild wasps leave its bees alone", () => {
+    const world = grid();
+    const newbie = world.found(programs('move_to([22, 6])\nwhile True:\n    wait(100)'), { x: 1, y: 0 }, 'newbie');
+    newbie.shielded = true;
+    const vet = world.found(programs(IDLE_QUEEN, IDLE_QUEEN, 'move_to([21, 6])\nprint(enemies_near(), sting([22, 6]))\nwhile True:\n    wait(100)'), { x: 0, y: 0 }, 'vet');
+    world.spawn(vet, 'wasp');
+    world.addNest({ x: 26, y: 6 }, 2); // wild wasps right beside the newcomer's bee
+    simulate(world, 400);
+    const [seen, stung] = [said(vet)[0].slice(0, said(vet)[0].lastIndexOf(' ')), said(vet)[0].split(' ').at(-1)];
+    expect(seen).not.toContain('[22, 6]'); // wild wasps may show up, the protected bee doesn't
+    expect(stung).toBe('False');
+    expect(newbie.bees).toHaveLength(1);
+    expect(newbie.bees[0].health).toBe(newbie.bees[0].maxHealth);
+  });
+
+  it('ends early when the protected colony attacks another player', () => {
+    const world = grid();
+    const raider = world.found(programs('move_to([22, 6])\nprint(steal())\nwhile True:\n    wait(100)'), { x: 0, y: 0 }, 'raider');
+    raider.shielded = true;
+    raider.shieldEnds = 123;
+    world.found(programs('while True:\n    wait(100)'), { x: 1, y: 0 }, 'target').honey = 10;
+    simulate(world, 200);
+    expect(said(raider)).toEqual(['3']);
+    expect(raider.shielded).toBe(false);
+    expect(raider.shieldEnds).toBeNull();
+    expect(raider.log.some(l => l.text.includes('protection as a new colony has ended'))).toBe(true);
+  });
+
+  it("wild wasps only hunt on their nest's map", () => {
+    const world = grid();
+    // a bee one tile over the border from a nest's map: in sight, but not on that map
+    const c = world.found(programs('move_to([19, 5])\nwhile True:\n    wait(100)'), { x: 0, y: 0 }, 'ada');
+    world.addNest({ x: 24, y: 5 }, 3);
+    for (let t = 0; t < 600; t++) {
+      world.step();
+      for (const n of world.nests) for (const w of n.wasps) expect(world.mapAt(w)).toEqual({ x: 1, y: 0 });
+    }
+    expect(c.bees[0]).toMatchObject({ x: 19, y: 5, health: BEE_HEALTH });
+  });
+
+  it('keeps its protection through a save and restore', () => {
+    const world = grid();
+    const c = world.found(programs(IDLE_QUEEN), { x: 2, y: 2 }, 'ada');
+    c.shielded = true;
+    c.shieldEnds = 1_700_000_000_000;
+    const back = World.restore(programs(IDLE_QUEEN), JSON.parse(JSON.stringify(world.save())));
+    expect([back.colony.shielded, back.colony.shieldEnds]).toEqual([true, 1_700_000_000_000]);
+  });
+});
+
+describe('placing the hive', () => {
+  const programs = (forager = IDLE_QUEEN, queen = IDLE_QUEEN) => ({ forager: parse(forager), queen: parse(queen), shared: SHARED });
+  const map = { x: 1, y: 1 };
+  const x0 = COLS;
+  const y0 = ROWS;
+  const footprintClear = (flowers: { x: number; y: number }[], hive: { x: number; y: number }) => flowers.every(f => !inFootprint(hive, f.x, f.y));
+
+  it('goes anywhere on its own map with room for the hive, even beside a gate', () => {
+    const bare = new World(null, 5, { maps: [5, 5], hedges: true, flowers: [] });
+    expect(bare.hiveProblem(map, { x: x0 + 10, y: y0 + 6 })).toBeNull();
+    expect(bare.hiveProblem(map, { x: 2 * COLS + 5, y: y0 + 6 })).toMatch(/isn't on map \[1, 1\]/);
+    expect(bare.hiveProblem(map, { x: x0, y: y0 + 6 })).toMatch(/hedge/);
+    expect(bare.hiveProblem(map, { x: x0 + 5, y: y0 + 2 })).toMatch(/doesn't fit/); // its boxes would poke into the map above
+    expect(bare.hiveProblem(map, { x: x0 + 5, y: y0 + ROWS - 1 })).toMatch(/doesn't fit/);
+    // the gate in the hedge on the map's west side: the hive can sit right beside it
+    const gate = bare.gatesOf(map, { x: x0, y: y0 }).find(g => g.x === x0)!;
+    expect(bare.hiveProblem(map, { x: x0 + 1, y: Math.min(Math.max(gate.y, y0 + 3), y0 + ROWS - 2) })).toBeNull();
+  });
+
+  it("can't go on a flower, over flowers under its boxes, or by a wasp nest", () => {
+    const world = new World(null, 5, { maps: [5, 5], hedges: true, flowers: [[x0 + 10, y0 + 6]], nests: [[x0 + 4, y0 + 4]] });
+    expect(world.hiveProblem(map, { x: x0 + 10, y: y0 + 6 })).toMatch(/a flower grows there/);
+    expect(world.hiveProblem(map, { x: x0 + 10, y: y0 + 8 })).toMatch(/under the hive/); // the flower is two tiles behind it
+    expect(world.hiveProblem(map, { x: x0 + 10, y: y0 + 5 })).toMatch(/under the hive/); // and here in front of it
+    expect(world.hiveProblem(map, { x: x0 + 12, y: y0 + 6 })).toBeNull();
+    expect(world.hiveProblem(map, { x: x0 + 4, y: y0 + 6 })).toMatch(/wasp nest/);
+  });
+
+  it("keeps every map's meadow, minus the flowers that would grow under a placed hive", () => {
+    const hive = { x: x0 + 12, y: y0 + 7 };
+    let removed = 0;
+    for (let year = 1; year <= 4; year++) {
+      for (const season of ['spring', 'summer', 'autumn'] as const) {
+        const all = bloomMap(5, map, year, season);
+        const kept = bloomMap(5, map, year, season, [hive]);
+        expect(footprintClear(kept, hive)).toBe(true);
+        expect(kept).toEqual(all.filter(f => !inFootprint(hive, f.x, f.y)));
+        removed += all.length - kept.length;
+      }
+    }
+    expect(removed).toBeGreaterThan(0); // something did grow there, and no longer does
+    // at HIVE_SPOT nothing changes: bloom already keeps it clear
+    expect(bloomMap(5, map, 1, 'summer', [{ x: x0 + HIVE_SPOT.x, y: y0 + HIVE_SPOT.y }])).toEqual(bloomMap(5, map, 1, 'summer'));
+  });
+
+  it('founds a colony there, grows no flowers under it next season, and keeps it through a restart', () => {
+    const world = new World(null, 5, { maps: [5, 5], hedges: true, haltOnError: false, tick: SEASON_TICKS - 3 });
+    const hive = world.nearestHiveSpot(map, { x: x0 + 12, y: y0 + 7 });
+    expect(world.hiveProblem(map, hive)).toBeNull();
+    const colony = world.found(programs(), map, 'pip', hive);
+    expect(colony.hive).toEqual(hive);
+    expect(colony.bees[0]).toMatchObject(hive); // the first forager starts at home
+    simulate(world, 5);
+    expect(world.season).toBe('summer');
+    expect(footprintClear(world.flowers, hive)).toBe(true);
+    const back = World.restore(programs(), JSON.parse(JSON.stringify(world.save())));
+    expect(back.colonies[0].hive).toEqual(hive);
+    simulate(back, SEASON_TICKS);
+    expect(back.season).toBe('autumn');
+    expect(footprintClear(back.flowers, hive)).toBe(true);
+  });
+
+  it("puts single player's hive where it's placed, or finds the nearest spot that fits", () => {
+    const meadow = new World(null, 7);
+    const home = { x: 0, y: 0 };
+    expect(meadow.nearestHiveSpot(home, HIVE_SPOT)).toEqual(HIVE_SPOT); // the usual spot always fits
+    const spot = meadow.nearestHiveSpot(home, { x: 14, y: 8 });
+    expect(meadow.hiveProblem(home, spot)).toBeNull();
+    const world = new World(programs(), 7, { hive: spot });
+    expect(world.colony.hive).toEqual(spot);
+    expect(world.colony.bees.every(b => b.x === spot.x && b.y === spot.y)).toBe(true);
+    expect(footprintClear(world.flowers, spot)).toBe(true);
+  });
+});
+
+describe('raiders and other hives, as the screen sees them', () => {
+  const programs = () => ({ forager: parse(IDLE_QUEEN), queen: parse(IDLE_QUEEN), shared: SHARED });
+
+  it("lists other colonies' units on the hive, not its own bees or wild wasps, even while watching another map", () => {
+    const world = new World(null, 4, { maps: [2, 1], nests: [[COLS + 15, 6]], haltOnError: false });
+    const mine = world.found(programs(), { x: 0, y: 0 }, 'ann');
+    const theirs = world.found(programs(), { x: 1, y: 0 }, 'bob');
+    expect(mine.raiders).toEqual([]);
+    const raider = theirs.bees[0];
+    [raider.x, raider.y] = [mine.hive.x, mine.hive.y];
+    const wild = world.nests[0].wasps[0];
+    [wild.x, wild.y] = [mine.hive.x, mine.hive.y];
+    expect(mine.bees[0]).toMatchObject(mine.hive); // its own bee is home too
+    expect(mine.raiders).toEqual([{ owner: 'bob', role: 'forager' }]);
+    expect(toJson(world, mine, { x: 1, y: 0 }).colony!.raiders).toEqual([{ owner: 'bob', role: 'forager' }]);
+  });
+
+  it("shows other hives' honey, for the boxes on their hives", () => {
+    const world = new World(null, 4, { maps: [2, 1], haltOnError: false });
+    const mine = world.found(programs(), { x: 0, y: 0 }, 'ann');
+    const theirs = world.found(programs(), { x: 1, y: 0 }, 'bob');
+    theirs.honey = 120;
+    expect(toJson(world, mine, { x: 1, y: 0 }).otherHives).toEqual([{ ...theirs.hive, owner: 'bob', shielded: false, honey: 120 }]);
   });
 });

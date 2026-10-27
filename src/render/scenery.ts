@@ -4,8 +4,12 @@ import { disc, INK, outlined, paint, sprite } from './pixels';
 
 export const TILE = 16;
 
-/** One map's grass, tufts, leafy ground under flowers, worn dirt at its hive and a faint tile grid; positions are within the map. */
-export function makeGround(flowers: Tile[], hives: Tile[]): HTMLCanvasElement {
+/**
+ * One map's grass, tufts, leafy ground under flowers, worn dirt at its hive, hedgerows and a faint
+ * tile grid; positions are within the map. Hedge tiles just past the right and bottom edges (the
+ * neighbors' side of a shared border) are drawn as a strip along that edge, gaps and all.
+ */
+export function makeGround(flowers: Tile[], hives: Tile[], hedges: Tile[] = []): HTMLCanvasElement {
   const W = COLS * TILE;
   const H = ROWS * TILE;
   return sprite(W, H, g => {
@@ -33,47 +37,87 @@ export function makeGround(flowers: Tile[], hives: Tile[]): HTMLCanvasElement {
     g.fillStyle = 'rgba(20, 60, 10, 0.12)';
     for (let x = 1; x < COLS; x++) g.fillRect(x * TILE, 0, 1, H);
     for (let y = 1; y < ROWS; y++) g.fillRect(0, y * TILE, W, 1);
+
+    for (const h of hedges) {
+      if (h.x < COLS && h.y < ROWS) drawHedge(g, h.x * TILE, h.y * TILE, TILE, TILE, h.x * 31 + h.y);
+      else if (h.x === COLS && h.y >= 0 && h.y < ROWS) drawHedge(g, W - 4, h.y * TILE, 4, TILE, h.y); // the neighbor's hedge, east
+      else if (h.y === ROWS && h.x >= 0 && h.x < COLS) drawHedge(g, h.x * TILE, H - 4, TILE, 4, h.x); // and south
+    }
   });
 }
 
-/** Straw skep: stacked coils of straw (groove, body, highlight), binding stitches, lit from the left. */
-export function makeSkep(): HTMLCanvasElement {
-  const W = 21;
-  const H = 46;
-  const C = 22;
-  const B = 46;
-  const half = (h: number) => W * Math.pow(Math.max(0, 1 - Math.pow(h / H, 2.4)), 1 / 2.4) - (h < 2 ? 1 : 0);
+/** A block of hedgerow: dark leaves, lighter clumps, a few lit leaf tips, and a shadow at its foot. */
+function drawHedge(g: CanvasRenderingContext2D, x: number, y: number, w: number, h: number, seed: number): void {
+  const rnd = mulberry32(seed + 7);
+  g.fillStyle = '#2F5E1B';
+  g.fillRect(x, y, w, h);
+  for (let i = 0; i < (w * h) / 10; i++) {
+    g.fillStyle = rnd() < 0.5 ? '#4F8A2C' : '#3F7424';
+    g.fillRect(x + Math.floor(rnd() * (w - 1)), y + Math.floor(rnd() * (h - 1)), 2, 2);
+  }
+  for (let i = 0; i < (w * h) / 40; i++) {
+    g.fillStyle = '#6BAA3A';
+    g.fillRect(x + Math.floor(rnd() * w), y + Math.floor(rnd() * h), 1, 1);
+  }
+  g.fillStyle = 'rgba(16, 32, 8, 0.45)';
+  g.fillRect(x, y + h - 1, w, 1);
+}
+
+// the box under the roof is cream; boxes stacked on it as honey grows cycle mint, honey and pink
+const BOXES: [string, string, string][] = [
+  ['#ECE0BC', '#CDBF94', '#FFF6DA'],
+  ['#9CC9C2', '#77A59E', '#C4E6E0'],
+  ['#F2C46A', '#CF9C3C', '#FFE0A0'],
+  ['#E8A0A4', '#C47A7E', '#F8C6C8'],
+];
+const BOX_H = 9;
+
+/** How many boxes a hive stands with: one, and one more per 50 honey, up to four. */
+export const boxesFor = (honey: number): number => 1 + Math.min(3, Math.floor(honey / 50));
+
+/**
+ * A painted box hive: a tin roof, stacked boxes with hand holds, an entrance slit over a landing
+ * board, all on two blocks. Its bottom edge stands on the hive tile's bottom.
+ */
+export function makeBoxHive(boxes = 1): HTMLCanvasElement {
+  const W = 38;
+  const H = 14 + boxes * BOX_H;
   return outlined(
-    sprite(45, 47, g => {
+    sprite(W, H, g => {
       const R = (x: number, y: number, w: number, h: number, c: string) => {
         g.fillStyle = c;
         g.fillRect(x, y, w, h);
       };
-      for (let h = 0; h <= H; h++) {
-        const hw = half(h);
-        if (hw < 1) continue;
-        const y = B - h;
-        const x0 = Math.round(C - hw);
-        const x1 = Math.round(C + hw);
-        const band = h % 5;
-        for (let x = x0; x <= x1; x++) {
-          const u = (x - C) / hw;
-          let col = band === 0 ? '#8A5A1E' : band === 4 ? '#F2CB72' : '#D9A441';
-          if (u > 0.45) col = band === 0 ? '#6E4616' : band === 4 ? '#D9A441' : '#B8822E';
-          else if (u < -0.55 && band !== 0) col = '#F2CB72';
-          R(x, y, 1, 1, col);
-        }
-        if (band === 2) for (let x = x0 + 3 + ((Math.floor(h / 5)) % 2) * 3; x < x1 - 2; x += 6) R(x, y - 1, 1, 3, '#9C6A24');
+      const x0 = 3;
+      const bw = 32;
+      let y = 0;
+      // the roof: a tin lid with ribs and a lip
+      R(x0 - 2, y, bw + 4, 1, '#E4E9EB');
+      R(x0 - 2, y + 1, bw + 4, 3, '#AEB7BC');
+      R(x0 - 2, y + 4, bw + 4, 1, '#7D868B');
+      for (let x = x0 + 2; x < x0 + bw; x += 5) R(x, y + 1, 1, 3, '#C9D0D4');
+      y += 5;
+      for (let i = boxes - 1; i >= 0; i--) {
+        const [c, shade, lit] = BOXES[i];
+        R(x0, y, bw, BOX_H, c);
+        R(x0, y, bw, 1, lit);
+        R(x0 + bw - 4, y + 1, 4, BOX_H - 1, shade);
+        R(x0, y + BOX_H - 1, bw, 1, shade);
+        R(x0 + 11, y + 3, 9, 2, '#5C3A1C'); // the hand hold
+        R(x0 + 11, y + 3, 9, 1, '#3A2210');
+        y += BOX_H;
       }
-      // arched entrance, then a honey drip down the side
-      for (let h = 1; h <= 7; h++) {
-        const w = h <= 4 ? 5 : h === 5 ? 4 : h === 6 ? 3 : 1;
-        R(C - w, B - h, w * 2, 1, h === 7 ? '#2E1C10' : '#1A0F08');
+      // the entrance slit, then the landing board
+      R(x0 + 9, y - 2, 14, 1, '#1A0F08');
+      R(x0 - 1, y, bw + 2, 2, '#8B5A2B');
+      R(x0 + 6, y + 2, 20, 1, '#C48A50');
+      R(x0 + 6, y + 3, 20, 1, '#8B5A2B');
+      // two blocks
+      for (const bx of [x0 + 1, x0 + bw - 10]) {
+        R(bx, y + 4, 9, 5, '#9A968C');
+        R(bx, y + 4, 9, 1, '#BDB9AE');
+        R(bx + 3, y + 6, 3, 2, '#6E6A60');
       }
-      R(C + 9, B - 24, 2, 1, '#FFD45A');
-      R(C + 9, B - 23, 1, 5, '#E99A12');
-      R(C + 10, B - 23, 1, 2, '#C2700C');
-      R(C + 9, B - 18, 2, 2, '#E99A12');
     }),
     INK,
   );

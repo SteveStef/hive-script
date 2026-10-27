@@ -154,7 +154,9 @@ body {
 .log-row.raid { color: #ff8f6b; }
 .log-meta { color: #6e6650; margin-right: 10px; }
 
-.play { display: flex; flex-direction: column; gap: 12px; min-width: 0; min-height: 0; overflow-y: auto; }
+.play { display: flex; flex-direction: column; align-items: center; gap: 12px; min-width: 0; min-height: 0; overflow-y: auto; }
+/* everything in the column lines up with the meadow, which fitGame() sizes to the space left */
+.play > * { width: var(--game-w, 100%); max-width: 100%; flex-shrink: 0; }
 
 .screen {
   background: var(--wood);
@@ -164,7 +166,7 @@ body {
 
 #game {
   display: block;
-  width: 100%;
+  width: calc(var(--game-w, 100%) - 20px);
   height: auto;
   aspect-ratio: 320 / 192;
   image-rendering: pixelated;
@@ -173,21 +175,20 @@ body {
   background: #6eab36;
 }
 
-.hud {
-  display: grid;
-  grid-template-columns: minmax(0, 0.9fr) minmax(0, 1.4fr);
-  gap: 12px;
-  color: #2b1a10;
-}
-.colony, .card {
+.hud, .card {
   background: var(--wax);
-  padding: 12px 14px;
   box-shadow: inset 0 0 0 2px var(--honey-ink), inset 4px 4px 0 #fbe6ae, inset -4px -4px 0 #c99a3e;
   min-width: 0;
 }
-.colony { display: flex; flex-direction: column; gap: 10px; }
+/* the strip under the meadow: the season and the colony's numbers, then a chip per bee to follow */
+.hud { display: flex; flex-direction: column; gap: 6px; padding: 8px 12px; color: #2b1a10; }
+.hud-row { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 18px; min-width: 0; }
+.hud .season { flex: 0 1 auto; min-width: 0; }
+.hud .season-bar { flex: 0 0 64px; min-width: 0; }
+.card { padding: 12px 14px; }
 
-.stats { display: flex; flex-wrap: wrap; gap: 8px 20px; }
+.stats { display: flex; flex-wrap: wrap; gap: 4px 16px; }
+.stat { display: flex; align-items: baseline; gap: 5px; white-space: nowrap; }
 
 .season { display: flex; align-items: center; gap: 10px; font-size: 12px; color: #6b4a22; }
 .season b { font-family: var(--font-display); font-size: 17px; color: #2b1a10; white-space: nowrap; }
@@ -197,12 +198,20 @@ body {
 .season b[data-season='summer'] + .season-bar i { background: #e0a020; }
 .season b[data-season='autumn'] + .season-bar i { background: #c8642a; }
 .season b[data-season='winter'] + .season-bar i { background: #7fa8d8; }
-.stat b { display: block; font-family: var(--font-display); font-size: 26px; line-height: 1; font-variant-numeric: tabular-nums; }
-.stat span, .chips-head, .vars-head, .k { font-size: 10.5px; letter-spacing: 0.08em; text-transform: uppercase; color: #6b4a22; }
-.status { color: #6b4a22; margin-top: auto; }
+.stat b { font-family: var(--font-display); font-size: 21px; line-height: 1; font-variant-numeric: tabular-nums; }
+.stat span, .vars-head, .k { font-size: 10.5px; letter-spacing: 0.08em; text-transform: uppercase; color: #6b4a22; }
 
-/* one chip per living bee; the bar under the number is its energy */
-.chips { display: flex; flex-wrap: wrap; gap: 6px; min-height: 30px; }
+/* what's under the pointer, as a caption along the bottom of the meadow */
+.status {
+  position: absolute; left: 16px; bottom: 16px; max-width: calc(100% - 32px); z-index: 1; pointer-events: none;
+  padding: 3px 8px; font-size: 12px; line-height: 1.4; color: #f6ecd2; background: rgba(27, 18, 16, 0.82);
+}
+.status[hidden] { display: none; }
+
+/* one chip per living bee, in one row that scrolls sideways; the bar under the number is its energy */
+.chips { display: flex; flex: 1 1 0; gap: 6px; min-width: 0; min-height: 32px; overflow-x: auto; padding: 3px 3px 5px; align-items: center; }
+.chips .muted { font-size: 12px; white-space: nowrap; }
+.bee-chip { flex-shrink: 0; }
 .bee-chip {
   position: relative;
   font-family: var(--font-display);
@@ -222,6 +231,34 @@ body {
 .bee-chip.on { background: var(--honey); box-shadow: 0 0 0 2px var(--honey-ink), 0 0 0 4px #fff; }
 
 .card { display: flex; flex-direction: column; gap: 10px; }
+
+/* the followed bee's card, over a top corner of the meadow (the one away from the bee) */
+.float-card { position: absolute; top: 18px; right: 18px; z-index: 2; width: clamp(220px, 40%, 280px); max-height: calc(100% - 36px); display: flex; flex-direction: column; font-size: 12px; }
+.float-card .card { gap: 7px; padding: 10px 12px; }
+.float-card .card-head b { font-size: 18px; }
+.float-card .meters { grid-template-columns: auto minmax(40px, 90px) minmax(0, 1fr); gap: 4px 8px; }
+.float-card.left { right: auto; left: 18px; }
+.float-card[hidden] { display: none; }
+.float-card .card { overflow-y: auto; min-height: 0; color: #2b1a10; box-shadow: inset 0 0 0 2px var(--honey-ink), inset 4px 4px 0 #fbe6ae, inset -4px -4px 0 #c99a3e, 4px 4px 0 rgba(27, 18, 16, 0.45); }
+.float-card .facts { grid-template-columns: auto minmax(0, 1fr); }
+.screen.raided .float-card { top: 60px; max-height: calc(100% - 78px); }
+.card-close {
+  position: absolute; top: -8px; right: -8px; z-index: 1; width: 24px; height: 24px; padding: 0;
+  font: 700 18px/1 var(--font-display); color: var(--honey-ink); background: var(--honey); border: 0; box-shadow: 0 0 0 2px var(--honey-ink); cursor: pointer;
+}
+.card-close:focus-visible { outline: 2px solid #fff; outline-offset: 2px; }
+
+/* a raid on your hive: a red banner across the top of the meadow */
+.raid-banner {
+  position: absolute; top: 16px; left: 50%; transform: translateX(-50%); z-index: 3; max-width: calc(100% - 32px);
+  display: flex; align-items: center; gap: 12px; padding: 5px 6px 5px 12px;
+  font: 700 16px/1.2 var(--font-display); color: #fff6da; background: #d93a2a; box-shadow: 0 0 0 2px var(--honey-ink), 4px 4px 0 rgba(27, 18, 16, 0.45);
+  animation: raid-pulse 1s steps(2) infinite;
+}
+.raid-banner[hidden] { display: none; }
+.raid-banner .pbtn { white-space: nowrap; flex-shrink: 0; }
+@keyframes raid-pulse { 50% { background: #f04a3a; } }
+@media (prefers-reduced-motion: reduce) { .raid-banner { animation: none; } }
 .card-head { display: flex; justify-content: space-between; align-items: center; gap: 10px; }
 .card-head b { font-family: var(--font-display); font-size: 22px; font-weight: 700; }
 .badge { font-size: 11px; font-weight: 600; padding: 3px 8px; box-shadow: 0 0 0 2px var(--honey-ink); }
@@ -257,7 +294,9 @@ body {
   .layout { grid-template-columns: minmax(0, 1fr); }
   .code { grid-template-rows: auto 420px auto 180px; }
   .play { order: -1; overflow: visible; }
-  .hud { grid-template-columns: minmax(0, 1fr); }
+  .play > * { width: 100%; }
+  #game { width: 100%; }
+  .float-card { position: static; width: auto; max-height: none; margin-top: 10px; }
   .facts { grid-template-columns: auto minmax(0, 1fr); }
 }
 
@@ -480,7 +519,7 @@ body.on-title > .top, body.on-title > .layout { display: none; }
 .lesson-switch { display: flex; gap: 4px; font-size: 11px; letter-spacing: 0.1em; text-transform: uppercase; margin-bottom: -6px; }
 .lesson-switch[hidden] { display: none; }
 .lesson-panel {
-  display: flex; flex-direction: column; gap: 10px; padding: 14px 16px; color: #2b1a10; background: var(--wax); line-height: 1.55;
+  display: flex; flex-direction: column; gap: 10px; padding: 14px 16px; overflow-y: auto; color: #2b1a10; background: var(--wax); line-height: 1.55;
   box-shadow: inset 0 0 0 2px var(--honey-ink), inset 4px 4px 0 #fbe6ae, inset -4px -4px 0 #c99a3e;
 }
 .lesson-panel[hidden], .hud[hidden] { display: none; }

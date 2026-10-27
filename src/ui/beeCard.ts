@@ -11,7 +11,7 @@ export type StatusTone = 'ok' | 'warn' | 'dead';
 export function beeStatus(bee: BeeView): { label: string; tone: StatusTone } {
   if (bee.death) {
     const c = bee.death.cause;
-    const label = c === 'starved' ? 'Starved' : c === 'by choice' ? 'Gave its life' : c === 'stung' ? 'Stung to death' : 'Died of old age';
+    const label = c === 'starved' ? 'Starved' : c === 'by choice' ? 'Gave its life' : c === 'stung' ? 'Stung to death' : c === 'last sting' ? 'Its last sting' : 'Died of old age';
     return { label, tone: 'dead' };
   }
   if (bee.runner.error) return { label: 'Stopped by an error', tone: 'warn' };

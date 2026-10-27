@@ -27,10 +27,28 @@ starter scripts in small fixed worlds (the multiplayer ones in a two-map practic
 your computer), never your own scripts; finished lessons get a checkmark on your account. Scripts are saved to
 your account (single player and multiplayer keep separate sets).
 
+**Placing the hive:** before a colony starts, click where its hive goes: in single player on
+the new meadow before **Run** (it starts at your last spot, or the nearest one that fits), in
+multiplayer on the free map you picked. The hive needs its footprint (its tile, the three rows
+behind it and the row in front, one tile either side) on that map and clear of flowers and nests;
+a gate next to it is fine. Each map still grows its seeded meadow, minus anything under a hive,
+and the hive never moves once the colony starts (`World.hiveProblem`, `bloomMap`'s `hives`).
+
+**What the meadow shows:** the hive is a painted box hive that grows one box per 50 honey (up to
+four), and a brood comb in front of it has a cell per egg: egg, grub, then capped, with a ring and
+a rising "+1" when one hatches. Other players' bees and wasps have a red edge, wild wasps are grey
+like their paper nests, and a red banner over the meadow names any enemy on your hive, even while
+you watch another map (`ColonyView.raiders`). Under the meadow, one strip holds the season, the
+colony's numbers and a chip per bee; following a bee opens its card over the meadow. The meadow
+sizes itself to the window (`fitGame()`), so nothing scrolls.
+
 **Multiplayer** is a world of 5×5 maps (each the size of single player's meadow) shared by
-up to 25 players. The **World map** shows who holds each map; pick a free one to found your
-colony there. Positions are world positions (map `[c, r]` covers x `20c..20c+19`,
-y `12r..12r+11`), borders are open, so bees forage on neighbors' maps, and `my_map()` and
+up to 25 players. The **World map** shows who holds each map; pick a free one, then click a spot on it
+for your hive to found your colony there. Positions are world positions (map `[c, r]` covers x `20c..20c+19`,
+y `12r..12r+11`). Hedgerows run along every border and around the world, with one 2-tile gate
+per border placed by the world's seed; `move_to()` routes through gates by itself (A* around
+hedges, the old L-shaped route when nothing's in the way), `distance()` counts that route,
+`blocked(position)` and `gates()` let scripts ask, and worlds saved before hedges stay open. `my_map()` and
 `map_at(position)` give map numbers. The arrows and **Home** in the bar over the meadow
 switch which map you watch; other players' hives and bees show there, but never their code.
 **Deploy** (or Ctrl+Enter) sends every script to your colony, and each bee starts the new
@@ -43,10 +61,15 @@ A bee or wasp at another colony's hive can `steal()` its honey and `deposit()` i
 Wasps take saving up for: the queen builds the colony's **wasp nest** with
 `build_nest(position)` for 150 honey, and only then lays **wasps** with `lay("wasp")`, which
 hatch at the nest and live there: wasps need no comb. Enemy wasps can sting a nest down. Every wasp runs **wasp.bee**, can't collect
-nectar, and can `sting()` an enemy on the next tile. The default wasp.bee stands guard
+nectar, and can `sting()` an enemy on the next tile for 5 damage, as often as it likes. Worker bees
+can `sting()` too, but only once: 10 damage, and the bee dies when the sting lands (a miss costs
+nothing), leaving a "danger" scent its colony can smell. Bees can't sting nests. The default wasp.bee stands guard
 beside the hive. Each world also hangs three **wild wasp nests** on unclaimed maps: their
 wasps sting anyone's bees nearby (never inside a hive), a map with a nest can't be claimed,
-and a nest destroyed by players' wasps hangs again on a free map next spring.
+and a nest destroyed by players' wasps hangs again on a free map next spring. Wild wasps only
+hunt on their nest's own map. A **new colony is protected for 24 real hours**: other players
+can't raid or sting it and wild wasps leave it alone, its hive shimmers gold, and attacking
+another player ends the protection early (`shielded(position)` tells scripts).
 `enemies_near()` and `owner_at(position)` let scripts see who's around. Under the editor,
 **Chat** talks to everyone in your world and **Leaders** ranks its colonies by honey made. The server ticks every
 `GAME_TICK_MS` (133 by default: 7.5 ticks a second, half single player's 1×) and saves every

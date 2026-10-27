@@ -125,6 +125,19 @@ describe('the shared world', () => {
     for (let i = 0; i < n; i++) await worlds.tick();
   };
 
+  it('founds a colony with its hive where the player put it, and refuses a spot the skep does not fit', async () => {
+    const cookie = await signup('placer');
+    const go = (hive: { x: number; y: number }) =>
+      app.inject({ method: 'POST', url: '/api/colony/start', payload: { set: set(), map: { x: 3, y: 0 }, hive }, ...as(cookie) });
+    const elsewhere = await go({ x: 2, y: 6 }); // on map [0, 0], not [3, 0]
+    expect(elsewhere.statusCode).toBe(409);
+    expect(elsewhere.json().error).toMatch(/isn't on map \[3, 0\]/);
+    expect((await go({ x: 3 * 20 + 5, y: 1 })).json().error).toMatch(/doesn't fit/);
+    expect((await go({ x: 3 * 20 + 2, y: 6 })).statusCode).toBe(200); // the usual spot, which always fits
+    const world = (await app.inject({ url: '/api/world', ...as(cookie) })).json();
+    expect(world.maps.find((m: { mine: boolean }) => m.mine)).toMatchObject({ map: { x: 3, y: 0 }, hive: { x: 62, y: 6 } });
+  });
+
   it('shows a 5x5 world of free maps, founds a colony on one, and refuses a second', async () => {
     const cookie = await signup('pollenpal');
     const before = (await app.inject({ url: '/api/world', ...as(cookie) })).json();
@@ -238,7 +251,7 @@ describe('the shared world', () => {
     expect(messages[3].colony).toMatchObject({ tick: 1, map: { x: 2, y: 2 }, otherHives: [] });
     const neighbor = messages[4].colony!;
     expect(neighbor.map).toEqual({ x: 3, y: 2 });
-    expect(neighbor.otherHives).toEqual([{ x: 62, y: 30, owner: 'bo_ws' }]);
+    expect(neighbor.otherHives).toEqual([{ x: 62, y: 30, owner: 'bo_ws', shielded: true, honey: expect.any(Number) }]); // a new colony, still protected
     expect(neighbor.colony!.hive.x).toBe(42); // still ada's own colony, for the HUD
   });
 
@@ -282,5 +295,22 @@ describe('the shared world', () => {
     const later = await listen(b);
     expect(later.got.find(m => m.type === 'chat-history')!.messages).toMatchObject([{ username: 'chatty_a', text: 'hello neighbors' }]);
     later.ws.terminate();
+  });
+
+  it('protects a new colony for a while, then lets the protection lapse', async () => {
+    await app.close();
+    ({ app, worlds } = await buildApp(sql, { nests: 0, shieldMs: 300 }));
+    const cookie = await signup('newcomer');
+    await start(cookie, { x: 2, y: 3 });
+    const before = (await app.inject({ url: '/api/world', ...as(cookie) })).json();
+    expect(before.maps.find((m: { mine: boolean }) => m.mine).shieldEnds).toBeGreaterThan(Date.now());
+    const events = await sql`SELECT text FROM events`;
+    expect(events.some(e => String(e.text).includes('protected for'))).toBe(true);
+    await new Promise(r => setTimeout(r, 350));
+    await ticks(1);
+    const after = (await app.inject({ url: '/api/world', ...as(cookie) })).json();
+    expect(after.maps.find((m: { mine: boolean }) => m.mine).shieldEnds).toBeNull();
+    const ended = await sql`SELECT text FROM events WHERE tone = 'raid'`;
+    expect(ended.some(e => String(e.text).includes('protection as a new colony has ended'))).toBe(true);
   });
 });

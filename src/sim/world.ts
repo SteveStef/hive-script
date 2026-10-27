@@ -10,6 +10,14 @@ export const COLS = 20;
 export const ROWS = 12;
 /** Where a colony's hive sits inside its map; a single player hive is at [2, 6]. */
 export const HIVE_SPOT = { x: 2, y: 6 };
+
+/**
+ * The tiles a hive keeps clear: its own, the stacked boxes over the three rows behind (north of)
+ * it, and the row in front. No flower grows there.
+ */
+export function inFootprint(hive: Tile, x: number, y: number): boolean {
+  return Math.abs(x - hive.x) <= 1 && y >= hive.y - 3 && y <= hive.y + 1;
+}
 export const OPS_PER_TICK = 50; // script operations each bee (and the queen) may run per tick
 export const SENSE_RANGE = 6; // tiles a bee can see flowers from
 export const SMELL_RANGE = 12; // tiles a bee can smell scent from; scent carries farther than sight
@@ -75,7 +83,8 @@ export const LIFESPAN_MAX = 5400;
 export const BEE_HEALTH = 10;
 export const WASP_HEALTH = 30;
 export const HEALTH_PER_HONEY = 2; // health each honey eaten restores
-export const STING_DAMAGE = 5;
+export const STING_DAMAGE = 5; // a wasp's sting; wasps sting as often as they like
+export const BEE_STING_DAMAGE = 10; // a worker bee's one sting, which kills the bee when it lands
 export const STING_TICKS = 6;
 export const STEAL_TICKS = 10;
 
@@ -93,8 +102,7 @@ export const NEST_SPOT = { x: 12, y: 5 }; // where a nest hangs inside its map
 export const NEST_HEALTH = 60;
 export const NEST_WASPS = 4; // wild wasps a nest keeps
 export const NEST_SPAWN_TICKS = 600; // ticks between new wild wasps, while it has fewer than NEST_WASPS
-export const WILD_WANDER = 6; // tiles from the nest a wild wasp roams when it sees no one
-export const WILD_LEASH = [2 * COLS, 2 * ROWS]; // how far from the nest a wild wasp chases, across and down
+export const WILD_WANDER = 6; // tiles from the nest a wild wasp roams when it sees no one (never off the nest's map)
 
 // seasons
 export const SEASONS = ['spring', 'summer', 'autumn', 'winter'] as const;
@@ -156,7 +164,7 @@ export type Action =
   | { kind: 'sting'; left: number; target: Tile };
 type MoveAction = Extract<Action, { kind: 'move' }>;
 
-export type DeathCause = 'old age' | 'starved' | 'by choice' | 'stung';
+export type DeathCause = 'old age' | 'starved' | 'by choice' | 'stung' | 'last sting';
 
 export interface BeeStats {
   collected: number; // nectar picked up
@@ -264,9 +272,15 @@ export interface WorldOptions {
   /** Wasps the colony starts with, after its foragers (for the docs' clips). */
   wasps?: number;
   /** Another colony's hive on the same map, with honey in it and no bees (for the docs' clips). */
-  rival?: { x: number; y: number; honey: number; owner: string };
+  rival?: { x: number; y: number; honey: number; owner: string; shielded?: boolean };
   /** A wasp nest the colony already has (for the docs' clips). */
   nest?: [number, number];
+  /** Hedgerows along every border between maps and around the world, with one gate per border (multiplayer). */
+  hedges?: boolean;
+  /** With maps: still found single player's colony on map [0, 0] (the docs' clips of a hedged world). */
+  home?: boolean;
+  /** Where single player's hive sits, if not at HIVE_SPOT. */
+  hive?: Tile;
 }
 
 type Body = Omit<Bee, 'runner'>;
@@ -278,6 +292,8 @@ export interface ColonySave {
   map: Tile;
   hive?: Tile;
   nest?: ColonyNest | null;
+  shielded?: boolean;
+  shieldEnds?: number | null;
   foundedAt?: number;
   stolen?: number;
   kills?: number;
@@ -311,6 +327,7 @@ export interface WorldSave {
   nests?: (Omit<Nest, 'wasps'> & { wasps: Body[] })[];
   nextNestId?: number;
   nestsToRegrow?: number;
+  hedges?: boolean;
 }
 
 export interface WorldError {
@@ -350,6 +367,13 @@ export class Colony {
   kills = 0;
   /** The colony's wasp nest, once the queen has built one. */
   nest: ColonyNest | null = null;
+  /**
+   * A new colony's protection (multiplayer): other players can't raid or sting it, and wild wasps
+   * leave it alone. The server starts and ends it by real time (shieldEnds, in ms); attacking
+   * another player ends it early.
+   */
+  shielded = false;
+  shieldEnds: number | null = null;
   /** Whether the log has explained that wasps need a nest (once is enough). */
   waspNoteShown = false;
 
@@ -406,8 +430,12 @@ export class Colony {
     return t.x >= o.x - 1 && t.x <= o.x + COLS && t.y >= o.y - 1 && t.y <= o.y + ROWS;
   }
   /** Other colonies' hives on this colony's map (a docs clip's rival hive; in multiplayer a map holds one hive). */
-  get otherHives(): { x: number; y: number; owner: string | null }[] {
-    return this.world.colonies.filter(c => c !== this && this.onMap(c.hive)).map(c => ({ ...c.hive, owner: c.owner }));
+  get otherHives(): { x: number; y: number; owner: string | null; shielded: boolean; honey: number }[] {
+    return this.world.colonies.filter(c => c !== this && this.onMap(c.hive)).map(c => ({ ...c.hive, owner: c.owner, shielded: c.shielded, honey: c.honey }));
+  }
+  /** Other colonies' units standing on this hive, raiding it (wild wasps never go into a hive). */
+  get raiders(): { owner: string | null; role: string }[] {
+    return this.world.colonies.flatMap(c => (c === this ? [] : c.bees.filter(b => this.atHive(b)).map(b => ({ owner: c.owner, role: b.role }))));
   }
   /** Other colonies' units, and wild wasps (owner null), on or just at the edge of this colony's map. */
   get visitors(): (Body & { owner: string | null })[] {
@@ -418,6 +446,11 @@ export class Colony {
     }
     for (const n of this.world.nests) for (const { runner: _runner, ...w } of n.wasps) if (this.onMap(w)) out.push({ ...w, owner: null });
     return out;
+  }
+  /** Hedge tiles on the map on screen, and just past its edges. */
+  get hedges(): number[] {
+    if (!this.world.hedges.size) return [];
+    return [...this.world.hedges].filter(k => this.onMap(keyTile(k)));
   }
   /** Every nest on the map on screen: wild ones, and colonies' own (this one's included). */
   get nests(): { x: number; y: number; health: number; maxHealth: number; owner: string | null; wild: boolean }[] {
@@ -527,6 +560,7 @@ export class Colony {
     const body = ({ runner: _runner, ...rest }: Bee) => rest;
     return {
       id: this.id, owner: this.owner, map: this.map, hive: this.hive, nest: this.nest, foundedAt: this.foundedAt, stolen: this.stolen, kills: this.kills,
+      shielded: this.shielded, shieldEnds: this.shieldEnds,
       honey: this.honey, totalHoney: this.totalHoney, deaths: this.deaths, comb: this.comb,
       scents: [...this.scents].map(([key, marks]) => [key, [...marks]]),
       bees: this.bees.map(body),
@@ -566,6 +600,12 @@ export class World {
   readonly haltOnError: boolean;
   /** Multiplayer: the clock runs whether or not any colony is alive. */
   readonly persistent: boolean;
+  /** Hedge tiles (tileKey), which nothing flies into; empty without hedges. */
+  readonly hedges: Set<number>;
+  /** The gaps in the hedges between maps: two tiles per border. */
+  readonly gateTiles: Tile[];
+  private readonly planCache = new Map<string, Tile[]>(); // routes around hedges, for this tick
+  private planTick = -1;
   private nextId = 1;
   private nextColonyId = 1;
   private nextNestId = 1;
@@ -588,18 +628,24 @@ export class World {
     this.height = this.maps[1] * ROWS;
     this.fixedFlowers = options.flowers ?? null;
     this.tick = options.tick ?? 0;
+    const layout = options.hedges ? hedgeLayout(seed, this.maps) : { hedges: new Set<number>(), gates: [] };
+    this.hedges = layout.hedges;
+    this.gateTiles = layout.gates;
     this.flowers = this.grow();
     const nests = options.nests ?? 0;
     if (typeof nests === 'number') for (let i = 0; i < nests; i++) this.hangNest();
     else for (const [x, y] of nests) this.addNest({ x, y }, options.nestWasps ?? NEST_WASPS);
-    if (this.persistent) return;
+    if (this.persistent && !options.home) return;
     // single player: one colony on the one map, idle until there are scripts
-    const colony = this.addColony(programs, { x: 0, y: 0 }, null);
+    const colony = this.addColony(programs, { x: 0, y: 0 }, null, options.hive);
+    if (options.hive) this.flowers = this.grow(); // nothing grows under the hive
     colony.honey = options.honey ?? 0;
     colony.comb = options.comb ?? START_COMB;
     if (options.rival) {
-      const { x, y, honey, owner } = options.rival;
-      this.addColony(null, { x: 0, y: 0 }, owner, { x, y }).honey = honey;
+      const { x, y, honey, owner, shielded } = options.rival;
+      const rival = this.addColony(null, { x: 0, y: 0 }, owner, { x, y });
+      rival.honey = honey;
+      rival.shielded = !!shielded;
     }
     if (!programs) return;
     this.startColony(colony, options.bees ?? START_BEES);
@@ -633,6 +679,114 @@ export class World {
 
   inside(x: number, y: number): boolean {
     return x >= 0 && y >= 0 && x < this.width && y < this.height;
+  }
+
+  /** Whether nothing can fly into a tile: outside the world, or a hedge. */
+  blocked(tile: Tile): boolean {
+    return !this.inside(tile.x, tile.y) || this.hedges.has(tileKey(tile.x, tile.y));
+  }
+
+  /**
+   * The tiles to fly through from one tile to another, not including the start; [] when it
+   * can't be reached. An L-shaped route when one is clear of hedges (always, on an open map),
+   * otherwise the shortest way around them. Other units are left to claim() and steer().
+   */
+  plan(from: Tile, to: Tile, xFirst = true): Tile[] {
+    const first = route(from, to, xFirst);
+    if (!this.hedges.size) return first;
+    const clear = (path: Tile[]) => path.every(t => !this.hedges.has(tileKey(t.x, t.y)));
+    if (clear(first)) return first;
+    const other = route(from, to, !xFirst);
+    if (clear(other)) return other;
+    if (this.blocked(to)) return [];
+    if (this.planTick !== this.tick) {
+      this.planCache.clear();
+      this.planTick = this.tick;
+    }
+    const key = `${from.x},${from.y}>${to.x},${to.y}`;
+    let path = this.planCache.get(key);
+    if (!path) this.planCache.set(key, (path = this.search(from, to)));
+    return path.map(t => ({ ...t }));
+  }
+
+  /** How many tiles a bee flies between two tiles, going around hedges (Manhattan distance on an open map). */
+  travel(a: Tile, b: Tile): number {
+    const straight = Math.abs(a.x - b.x) + Math.abs(a.y - b.y);
+    if (!this.hedges.size || straight === 0) return straight;
+    return this.plan(a, b).length || straight; // can't be reached: the straight count is the best answer there is
+  }
+
+  /** A* over the tiles that aren't hedge: 4 directions, Manhattan distance to go, ties to the lower tile. */
+  private search(from: Tile, to: Tile): Tile[] {
+    const W = this.width;
+    const n = W * this.height;
+    const cost = new Int32Array(n).fill(-1);
+    const prev = new Int32Array(n).fill(-1);
+    const start = from.y * W + from.x;
+    const goal = to.y * W + to.x;
+    const h = (i: number) => Math.abs((i % W) - to.x) + Math.abs(Math.floor(i / W) - to.y);
+    const heap: [number, number][] = []; // [f, tile], smallest first
+    const less = (a: [number, number], b: [number, number]) => a[0] < b[0] || (a[0] === b[0] && a[1] < b[1]);
+    const push = (item: [number, number]) => {
+      heap.push(item);
+      for (let i = heap.length - 1; i > 0; ) {
+        const up = (i - 1) >> 1;
+        if (!less(heap[i], heap[up])) break;
+        [heap[i], heap[up]] = [heap[up], heap[i]];
+        i = up;
+      }
+    };
+    const pop = (): [number, number] => {
+      const top = heap[0];
+      const last = heap.pop()!;
+      if (heap.length) {
+        heap[0] = last;
+        for (let i = 0; ; ) {
+          const l = 2 * i + 1;
+          const r = l + 1;
+          let m = i;
+          if (l < heap.length && less(heap[l], heap[m])) m = l;
+          if (r < heap.length && less(heap[r], heap[m])) m = r;
+          if (m === i) break;
+          [heap[i], heap[m]] = [heap[m], heap[i]];
+          i = m;
+        }
+      }
+      return top;
+    };
+    cost[start] = 0;
+    push([h(start), start]);
+    while (heap.length) {
+      const [, i] = pop();
+      if (i === goal) break;
+      const x = i % W;
+      const y = Math.floor(i / W);
+      for (const [dx, dy] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) {
+        const nx = x + dx;
+        const ny = y + dy;
+        if (this.blocked({ x: nx, y: ny })) continue;
+        const j = ny * W + nx;
+        const c = cost[i] + 1;
+        if (cost[j] !== -1 && cost[j] <= c) continue;
+        cost[j] = c;
+        prev[j] = i;
+        push([c + h(j), j]);
+      }
+    }
+    if (cost[goal] === -1) return [];
+    const path: Tile[] = [];
+    for (let i = goal; i !== start; i = prev[i]) path.push({ x: i % W, y: Math.floor(i / W) });
+    return path.reverse();
+  }
+
+  /** The gate tiles on the borders of a map, nearest to a tile first. */
+  gatesOf(map: Tile, near: Tile): Tile[] {
+    const x0 = map.x * COLS;
+    const y0 = map.y * ROWS;
+    const onBorder = (t: Tile) =>
+      ((t.x === x0 || t.x === x0 + COLS) && t.y >= y0 && t.y < y0 + ROWS) || ((t.y === y0 || t.y === y0 + ROWS) && t.x >= x0 && t.x < x0 + COLS);
+    const d = (t: Tile) => Math.abs(t.x - near.x) + Math.abs(t.y - near.y);
+    return this.gateTiles.filter(onBorder).sort((a, b) => d(a) - d(b) || tileKey(a.x, a.y) - tileKey(b.x, b.y));
   }
 
   /** The map a tile is on, as [column, row] of maps. */
@@ -696,9 +850,15 @@ export class World {
       const d = Math.hypot(b.x - bee.x, b.y - bee.y);
       if (d <= SENSE_RANGE) near.push([b, d]);
     };
-    for (const c of this.colonies) if (c !== colony) for (const b of c.bees) consider(b);
+    for (const c of this.colonies) if (c !== colony && !c.shielded) for (const b of c.bees) consider(b); // a protected colony can't be fought
     for (const n of this.nests) for (const w of n.wasps) consider(w);
     return near.sort((a, b) => a[1] - b[1] || a[0].id - b[0].id).map(([b]) => b);
+  }
+
+  /** Whether what's on a tile (a hive, a colony's nest, or a unit) belongs to a protected new colony. */
+  shieldedAt(tile: Tile): boolean {
+    const c = this.colonies.find(c => c.atHive(tile)) ?? this.colonyNestAt(tile) ?? this.colonies.find(c => c.bees.some(b => b.x === tile.x && b.y === tile.y));
+    return !!c?.shielded;
   }
 
   /** Whose a tile is: a hive's or nest's owner, else the owner of a unit on it ("wild" for wild wasps), else null. */
@@ -726,12 +886,37 @@ export class World {
     return best;
   }
 
+  /** Why a colony's hive can't go on a tile of a map, or null when it can (see hiveProblem). */
+  hiveProblem(map: Tile, hive: Tile): string | null {
+    return hiveProblem(map, hive, {
+      flowerAt: (x, y) => !!this.flowerAt(x, y),
+      hedgeAt: (x, y) => this.hedges.has(tileKey(x, y)),
+      nestAt: t => !!(this.nestAt(t) || this.colonyNestAt(t)),
+    });
+  }
+
+  /** The tile nearest to a spot where a hive can go on a map (HIVE_SPOT's when none can). */
+  nearestHiveSpot(map: Tile, from: Tile): Tile {
+    let best: Tile | null = null;
+    let bestDist = Infinity;
+    for (let y = map.y * ROWS; y < (map.y + 1) * ROWS; y++) {
+      for (let x = map.x * COLS; x < (map.x + 1) * COLS; x++) {
+        const d = Math.abs(x - from.x) + Math.abs(y - from.y);
+        if (d < bestDist && !this.hiveProblem(map, { x, y })) {
+          best = { x, y };
+          bestDist = d;
+        }
+      }
+    }
+    return best ?? { x: map.x * COLS + HIVE_SPOT.x, y: map.y * ROWS + HIVE_SPOT.y };
+  }
+
   /**
-   * Founds a colony with a queen and its first bees on a free map (multiplayer).
-   * The caller checks the map is free and inside the world.
+   * Founds a colony with a queen and its first bees on a free map (multiplayer), its hive at
+   * HIVE_SPOT unless placed elsewhere. The caller checks the map is free and the hive can go there.
    */
-  found(programs: Programs, map: Tile, owner: string | null): Colony {
-    const colony = this.addColony(programs, map, owner);
+  found(programs: Programs, map: Tile, owner: string | null, hive?: Tile): Colony {
+    const colony = this.addColony(programs, map, owner, hive);
     this.startColony(colony, START_BEES);
     return colony;
   }
@@ -795,9 +980,9 @@ export class World {
     }
     const flowers: Flower[] = [];
     for (let my = 0; my < this.maps[1]; my++) {
-      for (let mx = 0; mx < this.maps[0]; mx++) flowers.push(...bloomMap(this.seed, { x: mx, y: my }, this.year, season));
+      for (let mx = 0; mx < this.maps[0]; mx++) flowers.push(...bloomMap(this.seed, { x: mx, y: my }, this.year, season, this.colonies.map(c => c.hive)));
     }
-    return flowers;
+    return flowers.filter(f => !this.hedges.has(tileKey(f.x, f.y))); // nothing grows in a hedge
   }
 
   private changeSeason(): void {
@@ -819,7 +1004,7 @@ export class World {
   save(): WorldSave {
     return {
       version: 2,
-      seed: this.seed, tick: this.tick, maps: this.maps, persistent: this.persistent,
+      seed: this.seed, tick: this.tick, maps: this.maps, persistent: this.persistent, hedges: this.hedges.size > 0,
       flowers: this.flowers,
       rng: this.rng.state(),
       nextId: this.nextId,
@@ -837,7 +1022,7 @@ export class World {
    */
   static restore(programs: Programs | ((colony: ColonySave) => Programs | null), saved: WorldSave, options: Pick<WorldOptions, 'haltOnError'> = {}): World {
     const save = structuredClone(saved); // the world mutates what it holds; never share it with the caller's copy
-    const w = new World(null, save.seed, { tick: save.tick, haltOnError: options.haltOnError, maps: save.maps });
+    const w = new World(null, save.seed, { tick: save.tick, haltOnError: options.haltOnError, maps: save.maps, hedges: save.hedges });
     Object.assign(w, {
       persistent: save.persistent, flowers: save.flowers, nextId: save.nextId, nextColonyId: save.nextColonyId,
       nextNestId: save.nextNestId ?? 1, nestsToRegrow: save.nestsToRegrow ?? 0,
@@ -851,6 +1036,7 @@ export class World {
       Object.assign(c, {
         honey: cs.honey, totalHoney: cs.totalHoney, deaths: cs.deaths, comb: cs.comb, logCount: cs.logCount, emptyFor: cs.emptyFor, over: cs.over,
         foundedAt: cs.foundedAt ?? 0, stolen: cs.stolen ?? 0, kills: cs.kills ?? 0, nest: cs.nest ?? null,
+        shielded: cs.shielded ?? false, shieldEnds: cs.shieldEnds ?? null,
       });
       for (const [key, marks] of cs.scents) c.scents.set(key, new Map(marks));
       c.eggs.push(...cs.eggs);
@@ -930,7 +1116,7 @@ export class World {
 
   /** The queen's nest-building finishing: the nest goes up if the colony can afford it and the tile is free. */
   private buildNest(colony: Colony, at: Tile): boolean {
-    const free = !this.isHive(at) && !this.nestAt(at) && !this.colonyNestAt(at) && !this.flowerAt(at.x, at.y);
+    const free = !this.blocked(at) && !this.isHive(at) && !this.nestAt(at) && !this.colonyNestAt(at) && !this.flowerAt(at.x, at.y);
     if (colony.nest || colony.honey < NEST_COST || !free) return false;
     colony.honey -= NEST_COST;
     colony.nest = { x: at.x, y: at.y, health: NEST_HEALTH, maxHealth: NEST_HEALTH };
@@ -969,7 +1155,7 @@ export class World {
    */
   private steer(bee: Bee, a: MoveAction): void {
     const goingAlongX = a.path[0].x !== bee.x;
-    const other = route(bee, a.target, !goingAlongX);
+    const other = this.plan(bee, a.target, !goingAlongX);
     if (other.length && !this.taken(other[0], bee)) {
       a.path = other;
       return;
@@ -978,8 +1164,8 @@ export class World {
     for (const side of [RIGHT_OF[dir], RIGHT_OF[RIGHT_OF[RIGHT_OF[dir]]]]) {
       const [dx, dy] = STEP[side];
       const step = { x: bee.x + dx, y: bee.y + dy };
-      if (this.inside(step.x, step.y) && !this.taken(step, bee)) {
-        a.path = [step, ...route(step, a.target, goingAlongX)];
+      if (!this.blocked(step) && !this.taken(step, bee)) {
+        a.path = [step, ...this.plan(step, a.target, goingAlongX)];
         return;
       }
     }
@@ -1019,6 +1205,8 @@ export class World {
           ? `Stung to death at ${where} by ${by}${lost}.`
         : cause === 'by choice'
           ? `Gave its life at ${where}${lost}, freeing its cell of comb.`
+        : cause === 'last sting'
+          ? `Stung ${by} and died doing it: a bee stings only once. Its sting did ${BEE_STING_DAMAGE} damage${lost ? `, and it was${lost}` : ''}.`
           : `Died of old age at ${where}, ${(this.tick - bee.bornAt).toLocaleString('en-US')} ticks after hatching.`,
       'death',
     );
@@ -1032,7 +1220,7 @@ export class World {
         bee.facing = dir;
         const [dx, dy] = STEP[dir];
         const next = { x: bee.x + dx, y: bee.y + dy };
-        if (!this.inside(next.x, next.y) || this.taken(next, bee)) {
+        if (this.blocked(next) || this.taken(next, bee)) {
           bee.action = { kind: 'bump', left: BUMP_TICKS };
           bee.runner.resume(false);
           return;
@@ -1043,9 +1231,9 @@ export class World {
       }
       case 'move_to': {
         const target = { x: args[0] as number, y: args[1] as number };
-        const path = route(bee, target, true);
+        const path = this.blocked(target) ? [] : this.plan(bee, target);
         if (!path.length) {
-          bee.runner.resume(true);
+          bee.runner.resume(bee.x === target.x && bee.y === target.y); // already there, or no way in
           return;
         }
         bee.facing = dirTowards(bee, path[0]);
@@ -1184,16 +1372,21 @@ export class World {
         bee.runner.resume(ok);
         break;
       }
-      case 'mark': {
-        const key = tileKey(bee.x, bee.y);
-        if (!colony.scents.has(key)) colony.scents.set(key, new Map());
-        colony.scents.get(key)!.set(a.scent, this.tick);
+      case 'mark':
+        markScent(colony, bee, a.scent, this.tick);
         bee.runner.resume(true);
         break;
-      }
-      case 'sting':
-        bee.runner.resume(this.strike(bee, colony, a.target));
+      case 'sting': {
+        const hit = this.strike(bee, colony, a.target);
+        if (hit && bee.role !== 'wasp') {
+          // a worker bee's sting is its last: it leaves the alarm scent where it fell, and dies
+          markScent(colony, bee, 'danger', this.tick);
+          this.die(colony, bee, 'last sting', hit);
+          return false;
+        }
+        bee.runner.resume(!!hit);
         break;
+      }
       case 'steal':
         bee.runner.resume(this.steal(colony, bee));
         break;
@@ -1207,8 +1400,9 @@ export class World {
   /** Honey taken from another colony's hive the bee is at, as much as it can carry; 0 anywhere else. */
   private steal(colony: Colony, bee: Bee): number {
     const victim = this.colonies.find(c => c !== colony && c.atHive(bee));
-    const amount = victim ? Math.min(bee.capacity - bee.carrying, victim.honey) : 0;
+    const amount = victim && !victim.shielded ? Math.min(bee.capacity - bee.carrying, victim.honey) : 0;
     if (!victim || amount <= 0) return 0;
+    this.endShield(colony, victim);
     victim.honey -= amount;
     bee.carrying += amount;
     bee.stats.stolen = (bee.stats.stolen ?? 0) + amount;
@@ -1224,23 +1418,33 @@ export class World {
    * or, from a player's wasp, the nest on that tile. Wild wasps (from = null) never sting into a hive.
    * Returns whether it hit.
    */
-  private strike(attacker: Bee, from: Colony | null, target: Tile): boolean {
-    if (Math.abs(target.x - attacker.x) + Math.abs(target.y - attacker.y) > 1) return false; // the target flew off
+  /**
+   * A sting on a tile next to the attacker: the first enemy unit there, or (from a player's wasp)
+   * an enemy nest. Says what it hit, or null when it missed. Wasps do STING_DAMAGE; a worker
+   * bee does BEE_STING_DAMAGE, only to units, and the caller ends its life.
+   */
+  private strike(attacker: Bee, from: Colony | null, target: Tile): string | null {
+    if (Math.abs(target.x - attacker.x) + Math.abs(target.y - attacker.y) > 1) return null; // the target flew off
+    const wasp = attacker.role === 'wasp';
+    const damage = wasp ? STING_DAMAGE : BEE_STING_DAMAGE;
     const victims: { unit: Bee; colony: Colony | null; nest: Nest | null }[] = [];
     const at = (b: Bee) => b.x === target.x && b.y === target.y;
     if (from || !this.isHive(target)) {
-      for (const c of this.colonies) if (c !== from) for (const b of c.bees) if (at(b)) victims.push({ unit: b, colony: c, nest: null });
+      for (const c of this.colonies) if (c !== from && !c.shielded) for (const b of c.bees) if (at(b)) victims.push({ unit: b, colony: c, nest: null });
     }
     if (from) for (const n of this.nests) for (const w of n.wasps) if (at(w)) victims.push({ unit: w, colony: null, nest: n });
     victims.sort((a, b) => Number(b.unit.role === 'wasp') - Number(a.unit.role === 'wasp') || a.unit.id - b.unit.id);
     const v = victims[0];
     if (v) {
+      if (from && v.colony) this.endShield(from, v.colony);
       attacker.stats.stings = (attacker.stats.stings ?? 0) + 1;
-      this.hurt(v.unit, v.colony, v.nest, attacker, from);
-      return true;
+      this.hurt(v.unit, v.colony, v.nest, attacker, from, damage);
+      return v.colony ? `${v.colony.name}'s ${v.unit.role === 'wasp' ? 'wasp' : 'bee'} #${v.unit.id}` : 'a wild wasp';
     }
+    if (!wasp) return null; // nests are a wasp's job
     const owned = from && this.colonyNestAt(target);
-    if (owned && owned !== from) {
+    if (owned && owned !== from && !owned.shielded) {
+      this.endShield(from, owned);
       const n = owned.nest!;
       attacker.stats.stings = (attacker.stats.stings ?? 0) + 1;
       n.health -= STING_DAMAGE;
@@ -1252,10 +1456,10 @@ export class World {
         from.say(attacker, `Destroyed ${owned.name}'s wasp nest at [${n.x}, ${n.y}].`, 'raid');
         owned.say(null, `${from.name}'s wasp #${attacker.id} destroyed our wasp nest at [${n.x}, ${n.y}]. Our wasps live on, but the queen can't lay more until we build a new nest.`, 'raid');
       }
-      return true;
+      return `${owned.name}'s wasp nest`;
     }
     const nest = from && this.nestAt(target);
-    if (!nest) return false;
+    if (!nest) return null;
     attacker.stats.stings = (attacker.stats.stings ?? 0) + 1;
     nest.health -= STING_DAMAGE;
     this.events.push({ type: 'hit', id: 0, x: nest.x, y: nest.y });
@@ -1267,14 +1471,22 @@ export class World {
       from!.kills++;
       from!.say(attacker, `Destroyed the wild wasp nest at [${nest.x}, ${nest.y}]. Another will hang somewhere next spring.`, 'raid');
     }
-    return true;
+    return 'the wild wasp nest';
   }
 
-  private hurt(unit: Bee, colony: Colony | null, nest: Nest | null, attacker: Bee, from: Colony | null): void {
-    unit.health -= STING_DAMAGE;
+  /** A protected colony that attacks another player gives up its protection. */
+  private endShield(attacker: Colony, victim: Colony): void {
+    if (!attacker.shielded) return;
+    attacker.shielded = false;
+    attacker.shieldEnds = null;
+    attacker.say(null, `Our colony attacked ${victim.name}, so its protection as a new colony has ended. Others can raid and sting us now.`, 'raid');
+  }
+
+  private hurt(unit: Bee, colony: Colony | null, nest: Nest | null, attacker: Bee, from: Colony | null, damage: number): void {
+    unit.health -= damage;
     this.events.push({ type: 'hit', id: unit.id, x: unit.x, y: unit.y });
     if (unit.health > 0) return;
-    const by = from ? `${from.name}'s wasp #${attacker.id}` : 'a wild wasp';
+    const by = from ? `${from.name}'s ${attacker.role === 'wasp' ? 'wasp' : 'bee'} #${attacker.id}` : 'a wild wasp';
     if (colony) this.die(colony, unit, 'stung', by);
     else if (nest) {
       nest.wasps.splice(nest.wasps.indexOf(unit), 1);
@@ -1345,10 +1557,13 @@ export class World {
       else w.action = { kind: 'wait', left: 60 };
       return;
     }
-    const leashed = (t: Tile) => Math.abs(t.x - nest.x) <= WILD_LEASH[0] && Math.abs(t.y - nest.y) <= WILD_LEASH[1];
+    // a wild wasp guards its nest's own map: it hunts nobody beyond it, and never a protected colony's bees
+    const nestMap = this.mapAt(nest);
+    const leashed = (t: Tile) => { const m = this.mapAt(t); return m.x === nestMap.x && m.y === nestMap.y; };
     let prey: Bee | null = null;
     let best = Infinity;
     for (const c of this.colonies) {
+      if (c.shielded) continue;
       for (const b of c.bees) {
         const d = Math.hypot(b.x - w.x, b.y - w.y);
         if (d <= SENSE_RANGE && d < best && leashed(b) && !this.isHive(b)) {
@@ -1372,8 +1587,14 @@ export class World {
         w.action = { kind: 'wait', left: 20 + Math.floor(this.rng() * 40) };
         return;
       }
-      const x = Math.max(0, Math.min(this.width - 1, nest.x + Math.floor(this.rng() * (WILD_WANDER * 2 + 1)) - WILD_WANDER));
-      const y = Math.max(0, Math.min(this.height - 1, nest.y + Math.floor(this.rng() * (WILD_WANDER * 2 + 1)) - WILD_WANDER));
+      const x0 = nestMap.x * COLS;
+      const y0 = nestMap.y * ROWS;
+      const x = Math.max(x0, Math.min(x0 + COLS - 1, nest.x + Math.floor(this.rng() * (WILD_WANDER * 2 + 1)) - WILD_WANDER));
+      const y = Math.max(y0, Math.min(y0 + ROWS - 1, nest.y + Math.floor(this.rng() * (WILD_WANDER * 2 + 1)) - WILD_WANDER));
+      if (this.blocked({ x, y })) {
+        w.action = { kind: 'wait', left: BUMP_TICKS }; // a spot in the hedge: pick again soon
+        return;
+      }
       spot = nest.roam[w.id] = { x, y };
     }
     if (!this.stepToward(w, spot)) delete nest.roam[w.id]; // blocked: pick somewhere else next time
@@ -1386,8 +1607,9 @@ export class World {
     const xs = { x: w.x + dx, y: w.y };
     const ys = { x: w.x, y: w.y + dy };
     const options = Math.abs(t.x - w.x) >= Math.abs(t.y - w.y) ? [dx ? xs : null, dy ? ys : null] : [dy ? ys : null, dx ? xs : null];
+    if (this.hedges.size) options.unshift(this.plan(w, t)[0] ?? null); // the way around a hedge comes first
     for (const next of options) {
-      if (!next || this.taken(next, w)) continue;
+      if (!next || this.blocked(next) || this.taken(next, w)) continue;
       const a: MoveAction = { kind: 'move', path: [next], target: next, stepLeft: 0, moving: false, waited: 0, single: true };
       w.action = a;
       this.claim(w, a);
@@ -1417,6 +1639,51 @@ function checkSurvival(colony: Colony): void {
   if (colony.over) colony.say(null, colony.over, 'death');
 }
 
+/**
+ * Hedgerows for a world of maps: every map's left column and top row, and the world's last column
+ * and row, so one hedge runs along each border and around the whole world. Each border between two
+ * maps has one gate, two tiles wide, placed by the seed and kept away from the corners.
+ */
+export function hedgeLayout(seed: number, maps: [number, number]): { hedges: Set<number>; gates: Tile[] } {
+  const [mx, my] = maps;
+  const W = mx * COLS;
+  const H = my * ROWS;
+  const hedges = new Set<number>();
+  for (let y = 0; y < H; y++) {
+    for (let c = 0; c < mx; c++) hedges.add(tileKey(c * COLS, y));
+    hedges.add(tileKey(W - 1, y));
+  }
+  for (let x = 0; x < W; x++) {
+    for (let r = 0; r < my; r++) hedges.add(tileKey(x, r * ROWS));
+    hedges.add(tileKey(x, H - 1));
+  }
+  // where along a border its gate starts: at least 2 tiles from each corner
+  const gateAt = (c: number, r: number, down: boolean, span: number) => {
+    const rnd = mulberry32((Math.imul(seed, 0x45d9f3b) + Math.imul(c + 1, 0x27d4eb2d) + Math.imul(r + 1, 0x165667b1) + (down ? 0x9e3779b1 : 0)) >>> 0);
+    return 2 + Math.floor(rnd() * (span - 5));
+  };
+  const gates: Tile[] = [];
+  const open = (x: number, y: number) => {
+    hedges.delete(tileKey(x, y));
+    gates.push({ x, y });
+  };
+  for (let r = 0; r < my; r++) {
+    for (let c = 0; c < mx; c++) {
+      if (c > 0) {
+        const g = r * ROWS + gateAt(c, r, true, ROWS); // the border between map [c - 1, r] and [c, r]
+        open(c * COLS, g);
+        open(c * COLS, g + 1);
+      }
+      if (r > 0) {
+        const g = c * COLS + gateAt(c, r, false, COLS); // the border between map [c, r - 1] and [c, r]
+        open(g, r * ROWS);
+        open(g + 1, r * ROWS);
+      }
+    }
+  }
+  return { hedges, gates };
+}
+
 /** Free cells of comb: every bee and egg takes one, except wasps, which live in the colony's nest. */
 export function combFree(comb: number, bees: { role: string }[], eggs: { role: string }[]): number {
   const inComb = (u: { role: string }) => u.role !== 'wasp';
@@ -1431,14 +1698,45 @@ export const seasonLeftAt = (tick: number): number => SEASON_TICKS - (tick % SEA
 export const scentStrength = (tick: number, markedAt: number): number =>
   Math.max(0, Math.ceil(SCENT_MAX * (1 - (tick - markedAt) / SCENT_LIFE)));
 
+/** What hiveProblem needs to know about the land. */
+export interface HiveLand {
+  flowerAt(x: number, y: number): boolean;
+  hedgeAt(x: number, y: number): boolean;
+  nestAt(tile: Tile): boolean;
+}
+
+/**
+ * Why a colony's hive can't go on a tile (world positions) of a map, or null when it can: its
+ * footprint must be on that map, clear of flowers and nests, and the hive tile can't be a hedge.
+ * A gate right next to it is fine.
+ */
+export function hiveProblem(map: Tile, hive: Tile, land: HiveLand): string | null {
+  const x0 = map.x * COLS;
+  const y0 = map.y * ROWS;
+  if (hive.x < x0 || hive.y < y0 || hive.x >= x0 + COLS || hive.y >= y0 + ROWS) return `it isn't on map [${map.x}, ${map.y}].`;
+  if (land.hedgeAt(hive.x, hive.y)) return "it's a hedge.";
+  if (hive.x - 1 < x0 || hive.x + 1 >= x0 + COLS || hive.y - 3 < y0 || hive.y + 1 >= y0 + ROWS) return "the hive doesn't fit this close to the edge of the map.";
+  if (land.flowerAt(hive.x, hive.y)) return 'a flower grows there.';
+  for (let y = hive.y - 3; y <= hive.y + 1; y++) {
+    for (let x = hive.x - 1; x <= hive.x + 1; x++) {
+      if (land.flowerAt(x, y)) return 'flowers would be under the hive.';
+      if (land.nestAt({ x, y })) return 'a wasp nest is in the way.';
+    }
+  }
+  return null;
+}
+
 /**
  * One map's flowers for a season, in world positions. Each map grows its own patches around
- * its hive spot, claimed or not; map [0, 0] grows exactly single player's meadow for the seed.
+ * its HIVE_SPOT, claimed or not, except under hives placed elsewhere (world positions); map
+ * [0, 0] grows exactly single player's meadow for the seed.
  */
-export function bloomMap(seed: number, map: Tile, year: number, season: Season): Flower[] {
+export function bloomMap(seed: number, map: Tile, year: number, season: Season, hives: Tile[] = []): Flower[] {
   if (season === 'winter') return [];
   const mapSeed = map.x === 0 && map.y === 0 ? seed : (Math.imul(seed, 0x2c1b3c6d) + Math.imul(map.x + 1, 0x297a2d39) + Math.imul(map.y + 1, 0x1b873593)) >>> 0;
-  return bloom(mapSeed, year, season, HIVE_SPOT).map(f => ({ ...f, x: f.x + map.x * COLS, y: f.y + map.y * ROWS }));
+  return bloom(mapSeed, year, season, HIVE_SPOT)
+    .map(f => ({ ...f, x: f.x + map.x * COLS, y: f.y + map.y * ROWS }))
+    .filter(f => !hives.some(h => inFootprint(h, f.x, f.y)));
 }
 
 /**
@@ -1449,10 +1747,10 @@ export function bloom(seed: number, year: number, season: Exclude<Season, 'winte
   const b = BLOOMS[season];
   const rnd = mulberry32((Math.imul(seed, 0x9e3779b1) ^ Math.imul(year * 4 + SEASONS.indexOf(season), 0x85ebca6b)) >>> 0);
   const used = new Set<number>();
-  // nothing grows on or right around the hive, nor under the skep's dome, which covers the tiles above it
+  // nothing grows on or right around the hive, nor under its boxes, which cover the tiles above it
   const free = (x: number, y: number) =>
     x >= 0 && y >= 0 && x < COLS && y < ROWS && !used.has(y * COLS + x) &&
-    !(Math.abs(x - hive.x) <= 1 && y >= hive.y - 3 && y <= hive.y + 1);
+    !inFootprint(hive, x, y);
   const centers: Tile[] = [];
   const flowers: Flower[] = [];
   for (let p = 0; p < b.patches; p++) {
@@ -1480,6 +1778,13 @@ export function bloom(seed: number, year: number, season: Exclude<Season, 'winte
     for (const t of patch) flowers.push({ ...t, kind: b.kind, nectar: b.nectar, max: b.nectar, regen: 0, color: Math.floor(rnd() * 2) });
   }
   return flowers;
+}
+
+/** Leaves (or freshens) a colony's scent on a unit's tile. */
+function markScent(colony: Colony, at: Tile, scent: string, tick: number): void {
+  const key = tileKey(at.x, at.y);
+  if (!colony.scents.has(key)) colony.scents.set(key, new Map());
+  colony.scents.get(key)!.set(scent, tick);
 }
 
 const RIGHT_OF: Record<Dir, Dir> = { north: 'east', east: 'south', south: 'west', west: 'north' };

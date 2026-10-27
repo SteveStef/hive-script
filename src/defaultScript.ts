@@ -1,83 +1,49 @@
-export const DEFAULT_FORAGER = `# forager.bee: every forager runs its own copy of this.
-# Press Run (or Ctrl+Enter). Click a bee to see its stats and which line it is on.
-# can_reach() comes from shared.bee, which every role can use.
+export const DEFAULT_FORAGER = `# forager.bee: every forager bee runs this, over and over.
+# Press Run, then click a bee to see which line it's on.
 while True:
-    if energy() < distance(get_pos(), hive_pos()) + 10:
-        # turn back while there's still enough energy to get home
-        go_home()
+    if energy() < distance(get_pos(), hive_pos()) + 20:
+        go_home()  # getting tired: head home while there's energy to get there
         eat()
     elif season() == "winter":
-        # nothing blooms in winter: stay in the hive and keep warm
-        go_home()
+        go_home()  # no flowers in winter: stay warm in the hive
         wait(30)
-    elif nectar() >= capacity():
+    elif nectar() == capacity():
         go_home()
-        deposit()
-        if space() == 0 and honey() >= 60:
-            build()  # turn honey into wax: one more cell of comb
+        deposit()  # nectar becomes honey
+        eat()  # top up before the next trip
     else:
         f = nearest_flower()
-        s = smell("food")
-        if f and can_reach(f):
+        if f:
             move_to(f)
-            if collect():
-                mark("food")  # tell the others: flowers here
-        elif s and distance(get_pos(), s) > 6 and can_reach(s):
-            # flowers out of sight that another bee marked: follow the scent
-            move_to(s)
+            collect()
         else:
-            # nothing to see or smell: explore somewhere new on our map (20 x 12 tiles)
-            m = my_map()
-            spot = [m[0] * 20 + random(20), m[1] * 12 + random(12)]
-            if can_reach(spot):
-                move_to(spot)
-            else:
-                go_home()
-                eat()
+            move_to(random_spot())  # nothing nearby: look somewhere new
 `;
 
-export const DEFAULT_QUEEN = `# queen.bee: the queen never leaves the hive. She decides when the colony grows.
-# Each egg costs 10 honey and needs a free cell of comb. It hatches into a worker.
-# Bees laid in autumn live through winter (bees age slowly then), but the colony needs
-# honey to get through the cold: about 5 per bee. So in autumn, keep that much back.
+export const DEFAULT_QUEEN = `# queen.bee: the queen stays in the hive and lays eggs.
+# Each egg costs 10 honey and hatches into a new forager.
 while True:
-    reserve = 10
-    if season() == "autumn":
-        reserve = 5 * bee_count()
-    if bee_count() == 0 and egg_count() == 0 and honey() >= 10:
-        lay()  # the hive is empty: lay no matter what
-    elif season() != "winter" and honey() >= reserve + 10 and space() > 0:
-        lay()
+    if season() != "winter" and honey() >= 10 + 5 * bee_count() and space() > 0:
+        lay()  # keeps about 5 honey per bee for winter
     else:
         wait(60)
 `;
 
-export const DEFAULT_WASP = `# wasp.bee: every wasp runs its own copy. Wasps hatch at the colony's wasp nest: the queen builds
-# one with build_nest(position) for 150 honey, then lays wasps with lay("wasp"), for 30 honey each.
-# Wasps can't collect nectar. They sting(), guard the hive and steal() from other hives.
-# This one stands guard beside the hive. A raider has to land on the hive to steal(),
-# which takes 10 ticks: time for two stings, enough to finish a bee.
+export const DEFAULT_WASP = `# wasp.bee: every wasp runs this. Wasps guard the hive and sting enemies.
 while True:
-    post = [hive_pos()[0] + 1, hive_pos()[1]]  # the tile just east of the hive
-    if energy() < 40 or health() <= max_health() / 2:
+    enemies = enemies_near()
+    if energy() < 40 or health() < 15:
         go_home()
         eat()  # eating heals stings, too
-    elif distance(get_pos(), post) > 0:
-        move_to(post)
+    elif enemies and distance(get_pos(), enemies[0]) == 1:
+        sting(enemies[0])
     else:
-        enemies = enemies_near()
-        if enemies and distance(get_pos(), enemies[0]) == 1:
-            sting(enemies[0])
-        else:
-            wait(1)
+        move_to([hive_pos()[0] + 1, hive_pos()[1]])  # stand guard next to the hive
+        wait(1)
 `;
 
-export const DEFAULT_SHARED = `# shared.bee: functions here work in every worker role's script (not the queen's).
-# Each bee still has its own copy of any variables.
-
-def can_reach(p):
-    # flying costs 1 energy per tile: is there enough to get there and back home?
-    return energy() > distance(get_pos(), p) + distance(p, hive_pos()) + 10
+export const DEFAULT_SHARED = `# shared.bee: functions you write here work in every worker bee's script.
+# It's empty for now. The docs show what you can put here.
 `;
 
 /** What a new role's script starts as. */

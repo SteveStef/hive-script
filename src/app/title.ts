@@ -1,6 +1,6 @@
 import beeSheetUrl from '../assets/bumble-bee.png';
 import { INK, disc, outlined, paint, sprite } from '../render/pixels';
-import { FLOWER_SPOTS, makeSkep, TINY } from '../render/scenery';
+import { FLOWER_SPOTS, makeBoxHive, TINY } from '../render/scenery';
 import { mulberry32 } from '../sim/rng';
 import type { Dir, FlowerKind } from '../sim/world';
 
@@ -28,19 +28,19 @@ interface TitleBee {
 }
 
 /**
- * The backdrop of the sign-in and menu pages: a meadow that fills the window, a skep,
+ * The backdrop of the sign-in and menu pages: a meadow that fills the window, a hive,
  * and a few bees going between the flowers and home. Clicking the meadow sends a bee there.
  */
 export class TitleMeadow {
   private readonly g: CanvasRenderingContext2D;
   private readonly sheet = new Image();
-  private readonly skep = makeSkep();
+  private readonly hive = makeBoxHive(2);
   private readonly still = matchMedia('(prefers-reduced-motion: reduce)').matches;
   private scale = 3;
   private ground: HTMLCanvasElement | null = null;
   private blooms: Bloom[] = [];
   private bees: TitleBee[] = [];
-  private home = { x: 0, y: 0 }; // the skep's entrance
+  private home = { x: 0, y: 0 }; // the hive's entrance
   private skepAt = { x: 0, y: 0 };
   private raf = 0;
   private last = 0;
@@ -86,7 +86,7 @@ export class TitleMeadow {
     // the page's panels sit in the middle, so on a wide window the flowers grow either side
     const clear = innerWidth > 900 ? 300 / this.scale : 0;
     const open = (x: number) => Math.abs(x - W / 2) > clear;
-    // the skep sits low on the left, under the panels' corner
+    // the hive sits low on the left, under the panels' corner
     this.skepAt = { x: Math.round(W * 0.1), y: Math.max(10, H - 62) };
     this.home = { x: this.skepAt.x + 22, y: this.skepAt.y + 40 };
 
@@ -195,7 +195,7 @@ export class TitleMeadow {
       const w = Math.sin(t * 0.03 - f.x * 0.05 - f.y * 0.02) + 0.45 * Math.sin(t * 0.01 + f.x * 0.03);
       g.drawImage(TINY[f.kind][f.shade], f.x - 1 + (w > 1.05 ? 1 : w < -1.25 ? -1 : 0), f.y - 1);
     }
-    g.drawImage(this.skep, this.skepAt.x, this.skepAt.y);
+    g.drawImage(this.hive, this.skepAt.x + 3, this.skepAt.y + 49 - this.hive.height); // standing where the old skep stood
 
     const ready = this.sheet.complete && this.sheet.naturalWidth > 0;
     for (const b of [...this.bees].sort((a, c) => a.y - c.y)) {
@@ -239,12 +239,12 @@ function shade(hex: string, k: number): string {
   return `rgb(${c(n >> 16)}, ${c((n >> 8) & 255)}, ${c(n & 255)})`;
 }
 
-/** The menu's pictures: one cell with a skep for single player, a comb of players' cells for multiplayer, an open book for the tutorial. */
+/** The menu's pictures: one cell with a hive for single player, a comb of players' cells for multiplayer, an open book for the tutorial. */
 export function menuArt(): { single: string; multi: string; tutorial: string } {
-  const skep = makeSkep();
+  const hive = makeBoxHive(2);
   const single = combArt([{ c: 0, r: 0, color: '#6EAB36' }], 36, (g, [[cx, cy]]) => {
     disc(g, cx, cy + 20, 15, 4, '#A7834F', true);
-    g.drawImage(skep, cx - 23, cy - 25);
+    g.drawImage(hive, cx - 20, cy + 23 - hive.height);
   });
   const grass = '#6EAB36';
   const mine = '#F5C127';

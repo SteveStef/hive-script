@@ -66,8 +66,17 @@
           <span class="map-label" id="map-label" aria-live="polite"></span>
           <button class="pbtn" id="map-home" type="button" title="Back to your colony's map">Home</button>
         </nav>
-        <div class="screen">
+        <div class="screen" id="screen">
           <canvas id="game"></canvas>
+          <div class="raid-banner" id="raid-banner" role="alert" hidden>
+            <span id="raid-text"></span>
+            <button class="pbtn" id="raid-go" type="button"></button>
+          </div>
+          <aside class="float-card" id="bee-float" aria-label="The followed bee" hidden>
+            <button class="card-close" id="card-close" type="button" title="Stop following">&times;</button>
+            <div class="card" id="bee-card"></div>
+          </aside>
+          <div class="status" id="status" aria-live="polite" hidden></div>
           <div class="world-panel" id="world-panel" hidden>
             <div class="world-card" role="dialog" aria-labelledby="world-title">
               <header class="world-head">
@@ -86,7 +95,7 @@
         </div>
         <section class="lesson-panel" id="lesson-panel" aria-live="polite" hidden></section>
         <div class="hud" id="hud">
-          <div class="colony">
+          <div class="hud-row">
             <div class="season">
               <b id="season-name">Spring</b>
               <span class="bar season-bar"><i id="season-bar"></i></span>
@@ -100,12 +109,11 @@
               <div class="stat"><b id="s-deaths">0</b><span>Died</span></div>
               <div class="stat"><b id="s-tick">0</b><span>Tick</span></div>
             </div>
-            <div class="role-counts" id="role-counts" hidden></div>
-            <div class="chips-head">Follow a bee</div>
-            <div class="chips" id="bee-chips"></div>
-            <div class="status" id="status">Hover the meadow to see tile positions.</div>
           </div>
-          <div class="card" id="bee-card"><p class="muted">Press Run to start the colony, then click a bee to see its stats.</p></div>
+          <div class="hud-row">
+            <div class="role-counts" id="role-counts" hidden></div>
+            <div class="chips" id="bee-chips" aria-label="Follow a bee"></div>
+          </div>
         </div>
       </section>
     </main>

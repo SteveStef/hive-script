@@ -6,7 +6,7 @@ import { toJson } from '../src/sim/view';
 import { SEASON_TICKS, SHARED_LINE_BASE, WILD_NESTS, World } from '../src/sim/world';
 
 const programs = () => ({ forager: parse(DEFAULT_FORAGER), queen: parse(DEFAULT_QUEEN), shared: parse(DEFAULT_SHARED, SHARED_LINE_BASE + 1) });
-const world = new World(null, 42, { maps: [5, 5], nests: WILD_NESTS, haltOnError: false });
+const world = new World(null, 42, { maps: [5, 5], nests: WILD_NESTS, hedges: true, haltOnError: false });
 for (let y = 0; y < 5; y++) for (let x = 0; x < 5; x++) if (!world.nestOn({ x, y })) world.found(programs(), { x, y }, `p${x}${y}`);
 for (let s = 0; s < 8; s++) {
   let worst = 0;

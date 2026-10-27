@@ -66,6 +66,6 @@ export const api = {
       colonies: { owner: string | null; mine: boolean; map: Tile; bees: number; wasps: number; honey: number; made: number; stolen: number; kills: number; age: number }[];
     }>('GET', '/api/leaderboard'),
   colony: () => call<ColonyStatus>('GET', '/api/colony'),
-  startColony: (set: ScriptSet, map: Tile) => call<ColonyStatus>('POST', '/api/colony/start', { set, map }),
+  startColony: (set: ScriptSet, map: Tile, hive?: Tile) => call<ColonyStatus>('POST', '/api/colony/start', { set, map, hive }),
   deploy: (set: ScriptSet) => call<{ ok: true; tick: number }>('POST', '/api/colony/deploy', { set }),
 };

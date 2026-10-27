@@ -13,6 +13,7 @@ const AWAY_LIMIT = 200; // events shown under "while you were away"
 const CHAT_MAX = 280; // characters in one chat message
 const CHAT_HISTORY = 50; // messages a player sees on arriving
 const CHAT_GAP_MS = 1000; // a player can send one message a second
+export const SHIELD_MS = 24 * 60 * 60 * 1000; // a new colony's protection, in real time
 
 /** A world running on this server. */
 interface Live {
@@ -35,7 +36,7 @@ interface Watcher {
 }
 
 /** What the browser sends to found or update a colony: every file, roles in order. */
-type FilesBody = { set?: ScriptSet; map?: Tile };
+type FilesBody = { set?: ScriptSet; map?: Tile; hive?: Tile };
 
 function validSet(body: FilesBody | undefined): ScriptSet | null {
   const s = body?.set;
@@ -50,6 +51,12 @@ function validMap(m: unknown): Tile | null {
   const t = m as Tile | undefined;
   const ok = (v: unknown, n: number) => Number.isInteger(v) && (v as number) >= 0 && (v as number) < n;
   return t && ok(t.x, MAPS[0]) && ok(t.y, MAPS[1]) ? { x: t.x, y: t.y } : null;
+}
+
+/** A hive tile the browser sent, in world tiles; not checked against the map yet. */
+function validTile(t: unknown): Tile | null {
+  const v = t as Tile | undefined;
+  return v && Number.isInteger(v.x) && Number.isInteger(v.y) ? { x: v.x, y: v.y } : null;
 }
 
 const CENTER: Tile = { x: Math.floor(MAPS[0] / 2), y: Math.floor(MAPS[1] / 2) };
@@ -75,6 +82,8 @@ export class WorldServer {
     readonly tickMs = 133,
     /** Wild wasp nests each new world hangs. */
     private readonly nests = WILD_NESTS,
+    /** How long a new colony is protected, in real milliseconds. */
+    private readonly shieldMs = SHIELD_MS,
   ) {}
 
   /** Loads every saved world, each colony running the code its player last deployed. */
@@ -116,10 +125,17 @@ export class WorldServer {
 
   /** One tick for every world: step, record each colony's events, retire colonies that died out, save now and then, and show watchers. */
   async tick(): Promise<void> {
+    const now = Date.now();
     for (const live of this.worlds.values()) {
       live.world.step();
       for (const seat of this.seats.values()) {
         if (seat.live !== live) continue;
+        const c = seat.colony;
+        if (c.shielded && c.shieldEnds !== null && now >= c.shieldEnds) {
+          c.shielded = false;
+          c.shieldEnds = null;
+          c.say(null, 'Our protection as a new colony has ended. From now on other players can raid and sting us, and wild wasps hunt our bees on their maps.', 'raid');
+        }
         await this.recordEvents(seat);
         if (seat.colony.over) await this.retire(seat);
       }
@@ -207,7 +223,7 @@ export class WorldServer {
 
   private async openWorld(): Promise<Live> {
     const seed = 1 + Math.floor(Math.random() * 999_999);
-    const world = new World(null, seed, { maps: MAPS, nests: this.nests, haltOnError: false });
+    const world = new World(null, seed, { maps: MAPS, nests: this.nests, hedges: true, haltOnError: false });
     const [row] = await this.sql<{ id: number }[]>`INSERT INTO worlds (seed, state) VALUES (${seed}, ${this.sql.json(world.save() as never)}) RETURNING id`;
     const live = { id: row.id, world };
     this.worlds.set(row.id, live);
@@ -229,13 +245,15 @@ export class WorldServer {
           nest: !!nest,
           owner: c?.owner ?? null,
           mine: !!seat && c === seat.colony,
+          shieldEnds: c?.shielded ? c.shieldEnds : null,
+          hive: c?.hive ?? null,
           bees: c?.bees.length ?? 0,
           honey: c?.honey ?? 0,
           made: c?.totalHoney ?? 0,
         });
       }
     }
-    return { world: live.id, seed: w.seed, tick: w.tick, size: MAPS, tickMs: this.tickMs, home: seat?.colony.map ?? null, fallen: this.fallen.get(userId) ?? null, maps };
+    return { world: live.id, seed: w.seed, tick: w.tick, size: MAPS, hedges: w.hedges.size > 0, tickMs: this.tickMs, home: seat?.colony.map ?? null, fallen: this.fallen.get(userId) ?? null, maps };
   }
 
   /** The player's world ranked by honey brought home, best first. */
@@ -324,8 +342,20 @@ export class WorldServer {
       const holder = live.world.colonyOn(map);
       if (holder) return reply.code(409).send({ error: `${holder.owner ?? 'Someone'} already holds map [${map.x}, ${map.y}]. Pick a free one.` });
       if (live.world.nestOn(map)) return reply.code(409).send({ error: `A wild wasp nest holds map [${map.x}, ${map.y}]. Pick another, or destroy the nest with your wasps first.` });
-      const colony = live.world.found(parsed.programs, map, user.username);
+      let hive: Tile | undefined;
+      if (req.body?.hive !== undefined) {
+        const t = validTile(req.body.hive);
+        if (!t) return reply.code(400).send({ error: 'Send the hive as a tile: {x, y}.' });
+        const problem = live.world.hiveProblem(map, t);
+        if (problem) return reply.code(409).send({ error: `Your hive can't go on [${t.x}, ${t.y}]: ${problem}` });
+        hive = t;
+      }
+      const colony = live.world.found(parsed.programs, map, user.username, hive);
+      colony.shielded = true;
+      colony.shieldEnds = Date.now() + this.shieldMs;
       colony.say(null, `Your colony was founded on map [${map.x}, ${map.y}] of world #${live.id}. It keeps running while you're away.`, 'note');
+      const hours = Math.round(this.shieldMs / 3_600_000);
+      colony.say(null, `As a new colony it's protected for ${hours} hour${hours === 1 ? '' : 's'}: other players can't raid or sting it, and wild wasps leave its bees alone. Attacking another player ends the protection early.`, 'note');
       await sql`INSERT INTO deploys (user_id, files) VALUES (${user.id}, ${sql.json(set as never)})`;
       await sql`INSERT INTO colonies (user_id, world_id, colony_id, map_x, map_y) VALUES (${user.id}, ${live.id}, ${colony.id}, ${map.x}, ${map.y})`;
       const seat: Seat = { userId: user.id, live, colony, loggedSeq: -1 };

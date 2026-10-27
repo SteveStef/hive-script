@@ -1,6 +1,6 @@
 import type { Value } from '../lang/interpreter';
 import {
-  COLS, combFree, ROWS, scentStrength, seasonAt, seasonLeftAt, tileKey, yearAt,
+  COLS, combFree, keyTile, ROWS, scentStrength, seasonAt, seasonLeftAt, tileKey, yearAt,
   type Bee, type Colony, type ColonyNest, type Egg, type Flower, type LogLine, type Queen, type Season, type Tile, type World, type WorldEvent,
 } from './world';
 
@@ -23,6 +23,13 @@ export interface QueenView {
 }
 export interface HiveView extends Tile {
   owner: string | null;
+  shielded: boolean; // a protected new colony
+  honey: number; // public: the world map shows it too
+}
+/** Another colony's unit standing on this colony's hive: raiding it. */
+export interface RaiderView {
+  owner: string | null;
+  role: string;
 }
 export interface NestView extends Tile {
   health: number;
@@ -44,6 +51,9 @@ export interface ColonyView {
   readonly hive: Tile | null;
   /** This colony's wasp nest, if it has built one. */
   readonly nest: ColonyNest | null;
+  /** Whether this colony is protected as a new colony, and until when (real time, ms). */
+  readonly shielded: boolean;
+  readonly shieldEnds: number | null;
   /** The top-left tile of the map on screen. */
   readonly origin: Tile;
   /** Flowers on the map on screen. */
@@ -54,8 +64,12 @@ export interface ColonyView {
   readonly visitors: VisitorView[];
   /** Wasp nests on the map on screen: wild ones, and colonies' own. */
   readonly nests: NestView[];
+  /** Hedge tiles (tileKey) on the map on screen, and just past its edges. */
+  readonly hedges: number[];
   /** Other colonies' hives on the map on screen. */
   readonly otherHives: HiveView[];
+  /** Other colonies' units on this colony's hive, wherever the screen is looking. */
+  readonly raiders: RaiderView[];
   readonly eggs: Egg[];
   readonly queen: QueenView | null;
   readonly log: LogLine[];
@@ -82,6 +96,8 @@ export interface OwnColonyJson {
   deaths: number;
   hive: Tile;
   nest: ColonyNest | null;
+  shielded: boolean;
+  shieldEnds: number | null;
   bees: BeeJson[];
   fallen: BeeJson[];
   eggs: Egg[];
@@ -89,6 +105,7 @@ export interface OwnColonyJson {
   log: LogLine[]; // the latest lines; a viewer keeps the ones whose seq it hasn't seen
   roleNames: string[];
   scents: [number, [string, number][]][];
+  raiders: RaiderView[];
   over: string | null;
 }
 
@@ -100,6 +117,7 @@ export interface ColonyJson {
   visitors: VisitorView[];
   otherHives: HiveView[];
   nests: NestView[];
+  hedges: number[];
   events: WorldEvent[];
   colony: OwnColonyJson | null;
 }
@@ -119,13 +137,18 @@ export function onMap(map: Tile, t: Tile): boolean {
   return x >= -1 && y >= -1 && x <= COLS && y <= ROWS;
 }
 
+/** The hedge tiles a screen showing a map draws: on it, and just past its edges. */
+export function hedgesOn(world: World, map: Tile): number[] {
+  return [...world.hedges].filter(k => onMap(map, keyTile(k)));
+}
+
 /** What a viewer needs after one tick: a map of the world, and their colony (if any) with logTail lines of log. */
 export function toJson(world: World, colony: Colony | null, map: Tile, logTail = 60): ColonyJson {
   const visitors: VisitorView[] = [];
   const otherHives: HiveView[] = [];
   for (const c of world.colonies) {
     if (c === colony) continue;
-    if (c.map.x === map.x && c.map.y === map.y) otherHives.push({ ...c.hive, owner: c.owner });
+    if (c.map.x === map.x && c.map.y === map.y) otherHives.push({ ...c.hive, owner: c.owner, shielded: c.shielded, honey: c.honey });
     for (const { runner: _runner, ...body } of c.bees) if (onMap(map, body)) visitors.push({ ...body, owner: c.owner });
   }
   const nests: NestView[] = [];
@@ -141,6 +164,7 @@ export function toJson(world: World, colony: Colony | null, map: Tile, logTail =
     visitors,
     otherHives,
     nests,
+    hedges: hedgesOn(world, map),
     events: world.events.filter(e => onMap(map, e)),
     colony: colony && {
       honey: colony.honey,
@@ -148,6 +172,8 @@ export function toJson(world: World, colony: Colony | null, map: Tile, logTail =
       deaths: colony.deaths,
       hive: colony.hive,
       nest: colony.nest,
+      shielded: colony.shielded,
+      shieldEnds: colony.shieldEnds,
       bees: colony.bees.map(beeJson),
       fallen: colony.fallen.slice(-10).map(beeJson),
       eggs: colony.eggs,
@@ -155,6 +181,7 @@ export function toJson(world: World, colony: Colony | null, map: Tile, logTail =
       log: colony.log.slice(-logTail),
       roleNames: colony.roleNames,
       scents: [...colony.scents].map(([key, marks]) => [key, [...marks]]),
+      raiders: colony.raiders,
       over: colony.over,
     },
   };
@@ -174,12 +201,16 @@ export class RemoteColony implements ColonyView {
   deaths = 0;
   hive: Tile | null = null;
   nest: ColonyNest | null = null;
+  shielded = false;
+  shieldEnds: number | null = null;
   map: Tile = { x: 0, y: 0 };
   flowers: Flower[] = [];
   bees: BeeView[] = [];
   visitors: VisitorView[] = [];
   otherHives: HiveView[] = [];
+  raiders: RaiderView[] = [];
   nests: NestView[] = [];
+  hedges: number[] = [];
   fallen: BeeView[] = [];
   eggs: Egg[] = [];
   queen: QueenView | null = null;
@@ -193,16 +224,16 @@ export class RemoteColony implements ColonyView {
   constructor(private readonly logLimit = 500) {}
 
   update(json: ColonyJson): void {
-    Object.assign(this, { tick: json.tick, map: json.map, flowers: json.flowers, visitors: json.visitors, otherHives: json.otherHives, nests: json.nests });
+    Object.assign(this, { tick: json.tick, map: json.map, flowers: json.flowers, visitors: json.visitors, otherHives: json.otherHives, nests: json.nests, hedges: json.hedges ?? [] });
     this.flowerIndex = new Map(json.flowers.map(f => [tileKey(f.x, f.y), f]));
     this.events.push(...json.events);
     const c = json.colony;
     if (!c) {
-      Object.assign(this, { honey: 0, comb: 0, deaths: 0, hive: null, nest: null, bees: [], fallen: [], eggs: [], queen: null, roleNames: ['forager'], over: null });
+      Object.assign(this, { honey: 0, comb: 0, deaths: 0, hive: null, nest: null, shielded: false, shieldEnds: null, bees: [], fallen: [], eggs: [], queen: null, roleNames: ['forager'], raiders: [], over: null });
       this.scents = new Map();
       return;
     }
-    Object.assign(this, { honey: c.honey, comb: c.comb, deaths: c.deaths, hive: c.hive, nest: c.nest ?? null, eggs: c.eggs, roleNames: c.roleNames, over: c.over });
+    Object.assign(this, { honey: c.honey, comb: c.comb, deaths: c.deaths, hive: c.hive, nest: c.nest ?? null, shielded: !!c.shielded, shieldEnds: c.shieldEnds ?? null, eggs: c.eggs, roleNames: c.roleNames, raiders: c.raiders ?? [], over: c.over });
     this.bees = c.bees.map(beeView);
     this.fallen = c.fallen.map(beeView);
     this.queen = c.queen && { runner: runnerView(c.queen.runner), action: c.queen.action, laid: c.queen.laid };

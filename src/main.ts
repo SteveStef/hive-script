@@ -10,7 +10,7 @@ import { Renderer, roleColor } from './render/renderer';
 import { TILE } from './render/scenery';
 import { parseScripts, type ScriptProblem, type ScriptSet } from './sim/scripts';
 import { RemoteColony, type BeeView, type ColonyJson, type ColonyView } from './sim/view';
-import { COLS, locate, MAX_ENERGY, MAX_ROLES, RESERVED_NAMES, ROLE_NAME, ROWS, SEASON_TICKS, World, type LogLine, type ScriptFile, type Tile } from './sim/world';
+import { COLS, HIVE_SPOT, hiveProblem, locate, MAX_ENERGY, MAX_ROLES, RESERVED_NAMES, ROLE_NAME, ROWS, SEASON_TICKS, tileKey, World, type LogLine, type ScriptFile, type Tile } from './sim/world';
 import { beeCard, beeStatus, queenCard, queenStatus } from './ui/beeCard';
 import { confirmDialog, promptDialog } from './ui/dialog';
 import { createEditor } from './ui/editor';
@@ -24,7 +24,7 @@ const LEADERS_REFRESH_MS = 5000; // ...and the leaderboard, while it's showing
 const CHAT_LIMIT = 200; // chat rows kept on screen
 const TAB_NOTES: Record<string, string> = {
   forager: 'every forager runs this; plain lay() lays foragers',
-  wasp: 'every wasp runs this; wasps hatch at the colony\'s nest: build_nest(), then lay("wasp")',
+  wasp: 'every wasp runs this; they hatch at the colony\'s wasp nest after lay("wasp")',
   shared: 'functions every worker role can use',
   queen: 'the queen runs this in the hive',
 };
@@ -42,6 +42,11 @@ const liveEl = $('live');
 const musicBtn = $<HTMLButtonElement>('music');
 const chipsEl = $('bee-chips');
 const cardEl = $('bee-card');
+const floatEl = $('bee-float');
+const screenEl = $('screen');
+const raidEl = $('raid-banner');
+const raidText = $('raid-text');
+const raidGo = $<HTMLButtonElement>('raid-go');
 const tabsEl = $('tabs');
 const roleCountsEl = $('role-counts');
 const mapBar = $('map-bar');
@@ -68,11 +73,26 @@ let mode: PlayMode = 'single';
 let roles: string[] = [];
 /** Every script file, in tab order; a lesson shows only its own tabs (and roles the player adds). */
 const files = (): ScriptFile[] =>
-  ['forager', ...roles, 'wasp', 'shared', 'queen'].filter(f => !lesson || lesson.tabs.includes(f) || roles.includes(f));
+  ['forager', ...roles, 'wasp', 'shared', 'queen'].filter(f =>
+    lesson ? lesson.tabs.includes(f) || roles.includes(f) : f !== 'wasp' || waspTab());
+
+/** wasp.bee only matters once the colony has a wasp nest (or wasps), so its tab waits until then. */
+function waspTab(): boolean {
+  const w = view();
+  return w.nest !== null || w.bees.some(b => b.role === 'wasp') || shownFile === 'wasp';
+}
+let waspTabShown = false;
 
 // single player: a world that runs here
 let seed = newSeed();
 let local = new World(null, seed);
+// placing a hive: the map it goes on, from single player's new meadow until Run, or from picking
+// a free multiplayer map until the colony is founded; null otherwise
+let placing: Tile | null = null;
+// single player: the new meadow with every flower, to check spots against (local grows none under its hive)
+let meadow = local;
+const SPOT_KEY = 'hive-script:hive-spot';
+let lastSpot = loadSpot();
 let running = false;
 let speed = 1;
 let acc = 0;
@@ -171,7 +191,7 @@ async function enter(next: Mode): Promise<void> {
   clearView(); // first, so a note from bringing scripts over stays in the log
   loadSet(mode === 'single' && fresh ? importBrowserScripts(set) : set);
   if (mode === 'single') {
-    local = new World(null, seed);
+    preview();
     sourceLines = {};
     setRunning(false);
   } else {
@@ -184,6 +204,7 @@ async function enter(next: Mode): Promise<void> {
 async function leave(): Promise<void> {
   await flushSaves();
   running = false;
+  placing = null;
   const s = socket;
   socket = null;
   s?.close();
@@ -242,8 +263,58 @@ function showProblem(problem: ScriptProblem): void {
 
 // ---- single player ----
 
-/** Parses every script and starts a fresh colony running them. */
+/** Single player's next meadow, paused, with the hive at the last spot used, or the nearest one it fits; clicking moves it. */
+function preview(): void {
+  const map = { x: 0, y: 0 };
+  meadow = new World(null, seed);
+  local = new World(null, seed, { hive: meadow.nearestHiveSpot(map, lastSpot ?? HIVE_SPOT) });
+  placing = map;
+  note('A new meadow. Click where your hive should go (not on flowers), then press Run.', 'note');
+}
+
+function loadSpot(): Tile | null {
+  try {
+    const t = JSON.parse(localStorage.getItem(SPOT_KEY) ?? 'null') as Tile | null;
+    return t && Number.isInteger(t.x) && Number.isInteger(t.y) ? { x: t.x, y: t.y } : null;
+  } catch {
+    return null;
+  }
+}
+
+/** Why the hive can't go on a tile while placing, or null when it can. */
+function placeProblem(tile: Tile): string | null {
+  if (!placing) return null;
+  if (mode !== 'multi') return meadow.hiveProblem(placing, tile);
+  const w = view();
+  const m = watchedMap(w);
+  if (m.x !== placing.x || m.y !== placing.y) return `it goes on map [${placing.x}, ${placing.y}]; pick another on the world map.`;
+  return hiveProblem(placing, tile, {
+    flowerAt: (x, y) => !!w.flowerAt(x, y),
+    hedgeAt: (x, y) => w.hedges.includes(tileKey(x, y)),
+    nestAt: t => w.nests.some(n => n.x === t.x && n.y === t.y),
+  });
+}
+
+/** Puts the hive on a tile while placing: single player moves it on the new meadow, multiplayer founds the colony there. */
+function placeHive(tile: Tile): void {
+  if (!placing || placeProblem(tile)) return; // the status line says why
+  if (mode === 'multi') return void found(placing, tile);
+  lastSpot = tile;
+  try {
+    localStorage.setItem(SPOT_KEY, JSON.stringify(tile));
+  } catch {
+    // remembering the spot is only a convenience
+  }
+  local = new World(null, seed, { hive: tile });
+}
+
+/** Parses every script and starts a fresh colony running them; Restart first shows the next meadow to place the hive on. */
 function start(): void {
+  if (!lesson && !placing) {
+    clearView();
+    preview();
+    return setRunning(false);
+  }
   editor.setError(null);
   const set = currentSet();
   const parsed = parseScripts(set);
@@ -256,13 +327,14 @@ function start(): void {
     met = lesson.goals.map(() => false);
     panel.goals(met);
   } else {
-    local = new World(parsed.programs, seed);
+    local = new World(parsed.programs, seed, { hive: local.colony.hive });
+    placing = null;
     local.colony.say(null, `Meadow #${seed}: flowers bloom in new places every season, and every game is a new meadow.`, 'note');
     seed = newSeed(); // the next Run or Restart grows a different meadow
   }
   sourceLines = linesOf(set);
   clearView();
-  select(local.colony.bees[0]?.id ?? null);
+  select(null); // the card opens when a bee is clicked, so it doesn't cover the meadow at the start
   acc = 0;
   setRunning(true);
   music.play(local.season); // from the Run click, so the browser lets sound start
@@ -566,9 +638,18 @@ async function pickMap(cell: MapCell): Promise<void> {
     closeWorld();
     return;
   }
+  // a free map: show it, and the next click there places the hive
+  placing = cell.map;
+  watch(cell.map);
+  closeWorld();
+  note(`Click where your hive goes on map [${cell.map.x}, ${cell.map.y}]: not on flowers, with room for the hive. World map picks another map.`, 'note');
+}
+
+/** Founds the colony on a map with its hive on a tile, after asking. */
+async function found(map: Tile, hive: Tile): Promise<void> {
   const sure = await confirmDialog({
-    title: `Found your colony on map [${cell.map.x}, ${cell.map.y}]?`,
-    message: 'Your queen and first forager move in, running the scripts in your tabs. The colony keeps working while you\'re away, until it dies out.',
+    title: `Put your hive on [${hive.x}, ${hive.y}]?`,
+    message: `Your colony is founded on map [${map.x}, ${map.y}]: the queen and first forager move in, running the scripts in your tabs. The hive stays here, and the colony keeps working while you're away, until it dies out.`,
     confirmLabel: 'Found it here',
   });
   if (!sure) return;
@@ -576,20 +657,14 @@ async function pickMap(cell: MapCell): Promise<void> {
   const set = currentSet();
   try {
     await flushSaves();
-    await api.startColony(set, cell.map);
+    await api.startColony(set, map, hive);
     sourceLines = linesOf(set);
     colonyExists = true;
-    closeWorld();
+    placing = null;
     clearView();
   } catch (err) {
-    if (err instanceof ApiError && err.problem) {
-      showProblem(err.problem);
-      closeWorld();
-    } else {
-      $('world-problem').textContent = err instanceof Error ? err.message : String(err);
-      overview = await api.world().catch(() => overview);
-      renderWorld();
-    }
+    if (err instanceof ApiError && err.problem) showProblem(err.problem);
+    else note(`Couldn't found your colony: ${err instanceof Error ? err.message : err}`, 'error');
   }
 }
 
@@ -720,10 +795,18 @@ function mapText(w: ColonyView): string {
   const bees = (n: number) => `${n} bee${n === 1 ? '' : 's'}`;
   const holder = w.otherHives[0]?.owner ?? null;
   const strangers = w.visitors.filter(b => b.owner !== holder).length; // bees from neither this map's colony nor yours
-  if (w.hive && here(w.hive)) return `Map [${m.x}, ${m.y}] · your colony${w.visitors.length ? ` · ${bees(w.visitors.length)} from other colonies` : ''}`;
+  const shield = w.shielded && w.shieldEnds ? ` · protected for ${hoursLeft(w.shieldEnds)}` : '';
+  if (w.hive && here(w.hive)) return `Map [${m.x}, ${m.y}] · your colony${shield}${w.visitors.length ? ` · ${bees(w.visitors.length)} from other colonies` : ''}`;
   const yours = w.hive ? ` · ${w.bees.filter(here).length} of your bees here` : '';
   const others = strangers ? ` · ${bees(strangers)} from other colonies` : '';
-  return `Map [${m.x}, ${m.y}] · ${w.otherHives.length ? `${holder ?? 'someone'}'s colony` : 'a free meadow'}${others}${yours}`;
+  const theirs = w.otherHives[0]?.shielded ? ' (protected new colony)' : '';
+  return `Map [${m.x}, ${m.y}] · ${w.otherHives.length ? `${holder ?? 'someone'}'s colony${theirs}` : 'a free meadow'}${others}${yours}`;
+}
+
+/** Real time until a moment, as "23h 41m" (or "12m"). */
+function hoursLeft(until: number): string {
+  const min = Math.max(0, Math.round((until - Date.now()) / 60_000));
+  return min >= 60 ? `${Math.floor(min / 60)}h ${min % 60}m` : `${min}m`;
 }
 
 // ---- saving scripts to the account ----
@@ -905,28 +988,80 @@ canvas.addEventListener('mousemove', e => {
   const p = canvasPoint(e);
   const w = view();
   hover = { x: w.origin.x + Math.floor(p.x / TILE), y: w.origin.y + Math.floor(p.y / TILE) };
+  if (placing) {
+    const problem = placeProblem(hover);
+    setStatus(`Tile [${hover.x}, ${hover.y}] · ${problem ? `your hive can't go here: ${problem}` : 'click to put your hive here'}`);
+    return;
+  }
   const flower = w.flowerAt(hover.x, hover.y);
   const other = w.otherHives.find(h => h.x === hover!.x && h.y === hover!.y);
   const nest = w.nests.find(n => n.x === hover!.x && n.y === hover!.y);
   const visitor = w.visitors.find(b => b.x === hover!.x && b.y === hover!.y);
   const hurt = (u: { health: number; maxHealth: number }) => (u.health < u.maxHealth ? `, health ${u.health} of ${u.maxHealth}` : '');
-  const what = w.atHive(hover)
+  const what = w.hedges.includes(tileKey(hover.x, hover.y))
+    ? ' · hedgerow: nothing flies through it; use a gate'
+    : w.atHive(hover)
     ? mode !== 'multi' || w.queen ? ' · the hive (click to follow the queen)' : ' · your hive'
-    : other ? ` · ${other.owner ?? 'another player'}'s hive`
+    : other ? ` · ${other.owner ?? 'another player'}'s hive${other.shielded ? ', a protected new colony: it can\'t be raided or stung yet' : ''}`
     : nest ? ` · ${nest.wild ? 'a wild wasp nest' : w.nest?.x === nest.x && w.nest?.y === nest.y ? 'your wasp nest' : `${nest.owner ?? 'another colony'}'s wasp nest`}${hurt(nest)}`
     : visitor ? ` · ${visitor.owner === null ? 'a wild wasp' : `${visitor.owner}'s ${visitor.role === 'wasp' ? 'wasp' : 'bee'} #${visitor.id}`}${hurt(visitor)}`
     : flower ? ` · ${flower.kind} with ${flower.nectar} of ${flower.max} nectar` : '';
   const scents = w.scentsAt(hover.x, hover.y).map(([name, strength]) => `"${name}" ${strength}`).join(', ');
-  hud.status.textContent = `Tile [${hover.x}, ${hover.y}]${what}${scents ? ` · scent ${scents}` : ''}`;
+  setStatus(`Tile [${hover.x}, ${hover.y}]${what}${scents ? ` · scent ${scents}` : ''}`);
 });
 canvas.addEventListener('mouseleave', () => {
   hover = null;
-  hud.status.textContent = 'Hover the meadow to see tile positions.';
+  setStatus('');
 });
+
+/** The caption along the bottom of the meadow: what's under the pointer; hidden when there's nothing to say. */
+function setStatus(text: string): void {
+  if (hud.status.textContent !== text) hud.status.textContent = text;
+  hud.status.hidden = !text;
+}
+
+$('card-close').addEventListener('click', () => select(null));
+
+/**
+ * Sizes the meadow to the space its column has left after the map bar and the strip, keeping
+ * its shape, so nothing under it is pushed out of the window. A lesson's text gets at least
+ * LESSON_MIN_PX and whatever the meadow leaves, and scrolls inside that. Everything in the column
+ * takes the meadow's width (--game-w). Narrow screens stack and scroll instead.
+ */
+function fitGame(): void {
+  const play = screenEl.parentElement!;
+  if (matchMedia('(max-width: 900px)').matches) {
+    play.style.removeProperty('--game-w');
+    lessonPanelEl.style.maxHeight = '';
+    return;
+  }
+  const gap = parseFloat(getComputedStyle(play).rowGap) || 0;
+  let rest = 0;
+  for (const el of play.children) {
+    if (el === screenEl || el === lessonPanelEl) continue;
+    const h = el.getBoundingClientRect().height;
+    if (h > 0) rest += h + gap;
+  }
+  const lessonShown = !lessonPanelEl.hidden;
+  if (lessonShown) rest += Math.min(lessonPanelEl.scrollHeight, LESSON_MIN_PX) + gap;
+  const frame = 20; // the wooden frame's padding, both sides
+  const tall = ((play.clientHeight - rest - frame) * renderer.width) / renderer.height;
+  const w = Math.floor(Math.max(240, Math.min(play.clientWidth - frame, tall)) + frame);
+  play.style.setProperty('--game-w', `${w}px`);
+  if (lessonShown) {
+    const meadow = ((w - frame) * renderer.height) / renderer.width + frame + gap;
+    const left = rest - Math.min(lessonPanelEl.scrollHeight, LESSON_MIN_PX) - gap;
+    lessonPanelEl.style.maxHeight = `${Math.max(LESSON_MIN_PX, Math.floor(play.clientHeight - left - meadow))}px`;
+  }
+}
+const LESSON_MIN_PX = 170; // the least a lesson's text gets under the meadow
+const fitter = new ResizeObserver(fitGame);
+for (const el of [screenEl.parentElement!, hudEl, lessonPanelEl, lessonSwitch, mapBar]) fitter.observe(el);
 canvas.addEventListener('click', e => {
   const w = view();
   const c = canvasPoint(e);
   const p = { x: c.x + w.origin.x * TILE, y: c.y + w.origin.y * TILE }; // in world pixels, as place() gives them
+  if (placing) return placeHive({ x: Math.floor(p.x / TILE), y: Math.floor(p.y / TILE) });
   let best: BeeView | null = null;
   let bestDist = 14;
   for (const bee of w.bees) {
@@ -966,7 +1101,8 @@ function frame(now: number): void {
   }
   const w = view();
   if (w.tick > 0) music.play(w.season);
-  renderer.draw(w, frac, typeof selected === 'number' ? selected : null, hover);
+  const ghost = placing && hover ? { tile: hover, ok: !placeProblem(hover) } : null;
+  renderer.draw(w, frac, typeof selected === 'number' ? selected : null, hover, ghost);
   w.events = [];
   updateHud(w);
   requestAnimationFrame(frame);
@@ -985,6 +1121,10 @@ function clock(ticks: number, msPerTick: number): string {
 }
 
 function updateHud(w: ColonyView): void {
+  if (!lesson && waspTab() !== waspTabShown) {
+    waspTabShown = !waspTabShown;
+    renderTabs(); // the nest was built (the wasp.bee tab appears), or it and every wasp are gone
+  }
   hud.honey.textContent = String(w.honey);
   hud.bees.textContent = String(w.bees.length);
   hud.eggs.textContent = String(w.eggs.length);
@@ -1028,7 +1168,12 @@ function updateHud(w: ColonyView): void {
       return `<button type="button" class="bee-chip ${s.tone}${wasp ? ' wasp' : ''}${b.id === selected ? ' on' : ''}" data-select="${b.id}" title="${wasp ? 'Wasp' : 'Bee'}: ${s.label}">#${b.id}<i style="width:${pct}%"></i></button>`;
     })
     .join('');
-  if (chips !== shownChips) chipsEl.innerHTML = shownChips = chips;
+  // with nobody to follow yet, the row says how to start
+  const idle = mode !== 'multi'
+    ? local.running ? 'Click a bee or the hive to follow it.' : 'Press Run to start the colony, then click a bee to follow it.'
+    : colonyExists ? 'Click one of your bees or your hive to follow it.' : 'Pick a free map on the world map to found your colony.';
+  const row = chips || `<p class="muted">${idle}</p>`;
+  if (row !== shownChips) chipsEl.innerHTML = shownChips = row;
 
   let card: string;
   if (selected === 'queen' && w.queen) {
@@ -1038,12 +1183,14 @@ function updateHud(w: ColonyView): void {
     const bee = w.findBee(typeof selected === 'number' ? selected : null);
     const at = bee && !bee.death && !bee.runner.finished && bee.runner.line ? locate(bee.role, bee.runner.line) : null;
     editor.setActiveLine(at?.file ?? null, at?.line ?? null);
-    const idle = mode !== 'multi'
-      ? local.running ? 'Click a bee or the hive, or pick from the list, to see stats.' : 'Press Run to start the colony, then click a bee to see its stats.'
-      : colonyExists ? 'Click one of your bees or your hive, or pick from the list, to see stats.' : 'Pick a free map on the world map to found your colony, then click a bee to see its stats.';
-    card = bee ? beeCard(bee, sourceLines, mode !== 'multi' ? TICKS_PER_SECOND : 1000 / tickMs) : `<p class="muted">${idle}</p>`;
+    card = bee ? beeCard(bee, sourceLines, mode !== 'multi' ? TICKS_PER_SECOND : 1000 / tickMs) : '';
   }
   if (card !== shownCard) cardEl.innerHTML = shownCard = card;
+  // the card floats over the top corner away from what it follows
+  floatEl.hidden = !card;
+  const followed = selected === 'queen' ? w.hive : w.findBee(typeof selected === 'number' ? selected : null);
+  if (followed) floatEl.classList.toggle('left', followed.x - w.origin.x >= COLS / 2);
+  updateRaid(w);
 
   // new log lines: everything after the newest one already shown
   let from = w.log.length;
@@ -1055,6 +1202,28 @@ function updateHud(w: ColonyView): void {
     consoleEl.scrollTop = consoleEl.scrollHeight;
   }
 }
+
+/** The banner over the meadow while other players' units are on your hive, wherever you're looking. */
+function updateRaid(w: ColonyView): void {
+  const raiders = w.raiders;
+  const raided = raiders.length > 0 && !!w.hive;
+  raidEl.hidden = !raided;
+  screenEl.classList.toggle('raided', raided);
+  if (!raided) return;
+  const first = raiders[0];
+  const who = `${first.owner ?? 'another colony'}'s ${first.role === 'wasp' ? 'wasp' : 'bee'}`;
+  const text = `Raid! ${who}${raiders.length > 1 ? ` and ${raiders.length - 1} more` : ''} ${raiders.length > 1 ? 'are' : 'is'} at your hive`;
+  if (raidText.textContent !== text) raidText.textContent = text;
+  const home = watchedMap(w).x === Math.floor(w.hive!.x / COLS) && watchedMap(w).y === Math.floor(w.hive!.y / ROWS);
+  const label = home ? 'Show me' : 'Go home';
+  if (raidGo.textContent !== label) raidGo.textContent = label;
+}
+raidGo.addEventListener('click', () => {
+  const hive = view().hive;
+  if (!hive) return;
+  if (raidGo.textContent === 'Go home') watch({ x: Math.floor(hive.x / COLS), y: Math.floor(hive.y / ROWS) });
+  else renderer.flash(hive);
+});
 
 function logRow(line: LogLine): HTMLElement {
   const row = document.createElement('div');
