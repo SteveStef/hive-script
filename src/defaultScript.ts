@@ -22,7 +22,7 @@ export const DEFAULT_WASP = `while True:
     wait(100)
 `;
 
-export const DEFAULT_SHARED = `# shared.bee: functions you write here work in every worker bee's script.
+export const DEFAULT_SHARED = `# shared.bee: functions you write here work in every script, the queen's too.
 `;
 
 /** What a new role's script starts as. */

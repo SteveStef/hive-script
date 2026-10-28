@@ -288,7 +288,7 @@ export const DOCS: Record<string, DocEntry> = {
   },
   role: {
     section: 'Roles',
-    details: 'The name of the role this bee hatched as. A role never changes. Each role has its own script already, so role() is most useful in shared.bee: functions there run for every role, and can check role() to act differently for each one.',
+    details: 'The name of the role this bee hatched as. A role never changes. Each role has its own script already, so role() is most useful in shared.bee: functions there run for every role, and the queen too (her role() is "queen"), and can check role() to act differently for each one.',
     returns: 'Text, like "forager" or "builder".',
     time: instant,
     demo: { forager: 'print("my role is", role())\nprint("every role:", roles())', roles: { builder: 'while True:\n    wait(100)' }, view: HIVE_VIEW, length: 120 },

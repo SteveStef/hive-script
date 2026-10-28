@@ -89,14 +89,15 @@ export function queenStatus(queen: QueenView): { label: string; tone: StatusTone
 }
 
 /** The queen's card: her script line, eggs and the comb they need. */
-export function queenCard(world: ColonyView, sourceLines: string[]): string {
+export function queenCard(world: ColonyView, sourceLines: Record<ScriptFile, string[]>): string {
   const queen = world.queen!;
+  const at = locate('queen', queen.runner.line); // shared.bee runs ahead of queen.bee
   const status = queenStatus(queen);
   const used = world.comb - world.space; // wasps live in the nest, not the comb
   const next = world.eggs[0];
   return `
     <div class="card-head"><b>The queen</b><span class="badge ${status.tone}">${status.label}</span></div>
-    <div class="card-line"><span class="k">Line ${queen.runner.line}</span><code>${esc(sourceLines[queen.runner.line - 1]?.trim() ?? '')}</code></div>
+    <div class="card-line"><span class="k">${at.file === 'shared' ? 'shared.bee line' : 'Line'} ${at.line}</span><code>${esc(sourceLines[at.file]?.[at.line - 1]?.trim() ?? '')}</code></div>
     <div class="meters">
       <span class="k">Comb</span>${bar(used, world.comb, used >= world.comb ? 'low' : 'nectar')}
       <span>${used} of ${world.comb} cells in use (${world.bees.length} bees, ${world.eggs.length} eggs)</span>

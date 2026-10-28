@@ -2,7 +2,7 @@ import type { WebSocket } from '@fastify/websocket';
 import type { FastifyInstance } from 'fastify';
 import { parseScripts, type ScriptSet } from '../src/sim/scripts';
 import { toJson } from '../src/sim/view';
-import { WILD_NESTS, World, type Colony, type ColonySave, type Programs, type Tile, type WorldSave } from '../src/sim/world';
+import { NEW_COLONY, WILD_NESTS, World, type Colony, type ColonySave, type Programs, type Tile, type WorldSave } from '../src/sim/world';
 import { currentUser, requireUser } from './auth';
 import type { Sql } from './db';
 import { loadScripts } from './scripts';
@@ -376,7 +376,7 @@ export class WorldServer {
         if (problem) return reply.code(409).send({ error: `Your hive can't go on [${t.x}, ${t.y}]: ${problem}` });
         hive = t;
       }
-      const colony = live.world.found(parsed.programs, map, user.username, hive);
+      const colony = live.world.found(parsed.programs, map, user.username, hive, NEW_COLONY); // no bees yet: the queen lays the first
       const shield = await this.shieldFor(user.id);
       colony.shieldEnds = shield.ends;
       colony.shielded = shield.ends !== null;

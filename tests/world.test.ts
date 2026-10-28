@@ -4,7 +4,7 @@ import { GUARD_WASP, SURVIVOR_FORAGER, SURVIVOR_QUEEN } from './fixtures';
 import { parse } from '../src/lang/parser';
 import {
   BEE_COST, BUILD_COST, HATCH_TICKS, LAY_TICKS, LIFESPAN_MAX, MARK_TICKS, MAX_ENERGY, MOVE_TICKS, SCENT_LIFE, SCENT_MAX,
-  BLOOMS, bloom, bloomMap, COLS, hedgeLayout, HIVE_SPOT, inFootprint, ROWS, SEASON_TICKS, SHARED_LINE_BASE, START_BEES, START_COMB, tileKey, World,
+  BLOOMS, bloom, bloomMap, COLS, hedgeLayout, HIVE_SPOT, inFootprint, NEW_COLONY, ROWS, START_HONEY, SEASON_TICKS, SHARED_LINE_BASE, START_BEES, START_COMB, tileKey, World,
   BEE_HEALTH, HATCH_TICKS as HATCH, NEST_BUILD_TICKS, NEST_COST, NEST_HEALTH, NEST_WASPS, STING_DAMAGE, STING_TICKS, WASP_CAPACITY, WASP_COST, WASP_HEALTH,
 } from '../src/sim/world';
 import { toJson } from '../src/sim/view';
@@ -67,7 +67,9 @@ describe('the starting scripts', () => {
   // short on purpose: they gather and grow, but keeping the colony alive is up to the player
   for (const seed of [1, 2, 3]) {
     it(`gather honey and hatch bees, then die out in the first year (seed ${seed})`, () => {
-      const world = makeWorld(DEFAULT_FORAGER, DEFAULT_QUEEN, 0, seed);
+      // a new game: no bees, honey for one egg, and the queen lays the first
+      const world = new World({ forager: parse(DEFAULT_FORAGER), queen: parse(DEFAULT_QUEEN), shared: SHARED }, seed, NEW_COLONY);
+      expect([world.colony.bees.length, world.colony.honey]).toEqual([0, START_HONEY]);
       simulate(world, SEASON_TICKS);
       expect(world.error).toBeNull();
       expect(world.colony.over).toBeNull();
@@ -77,6 +79,33 @@ describe('the starting scripts', () => {
       expect(world.colony.over).not.toBeNull();
     });
   }
+});
+
+describe('a new game: no bees and 10 honey', () => {
+  const programs = (queen: string, scout = 'while True:\n    wait(1000)') => ({
+    forager: parse('while True:\n    wait(1000)'), queen: parse(queen), roles: { scout: parse(scout) }, shared: SHARED,
+  });
+
+  it('the queen picks the first bee, and its egg hatches at once; later eggs take the usual time', () => {
+    const world = new World(programs('lay("scout")\nlay()\nwhile True:\n    wait(1000)'), 1, NEW_COLONY);
+    world.colony.honey = 20; // enough for a second egg, to compare
+    simulate(world, LAY_TICKS + 2);
+    expect(world.colony.bees.map(b => b.role)).toEqual(['scout']);
+    simulate(world, LAY_TICKS + 5);
+    expect(world.colony.eggs).toHaveLength(1);
+    expect(world.colony.eggs[0].hatchAt - world.colony.eggs[0].laidAt).toBe(HATCH_TICKS);
+  });
+
+  it('founding a multiplayer colony with the new start: no bees, 10 honey', () => {
+    const world = new World(null, 3, { maps: [2, 1], haltOnError: false });
+    const colony = world.found(programs('while True:\n    wait(1000)'), { x: 1, y: 0 }, 'ada', undefined, NEW_COLONY);
+    expect([colony.bees.length, colony.honey, colony.eggs.length]).toEqual([0, START_HONEY, 0]);
+  });
+
+  it('a queen who never lays lets the empty colony die out', () => {
+    const world = simulate(new World(programs('while True:\n    wait(100)'), 1, NEW_COLONY), 1000);
+    expect(world.colony.over).toMatch(/died out/);
+  });
 });
 
 describe('a colony whose scripts look after it', () => {
@@ -251,9 +280,25 @@ describe('roles', () => {
     expect(printed(world)).toContain('["forager", "builder", "wasp"] 1 1');
   });
 
-  it('the queen has no role()', () => {
-    const world = simulate(roleWorld('print(role())', {}), 5);
-    expect(world.error?.message).toContain('for worker bees');
+  it("the queen's role() is \"queen\", and she knows where the hive is", () => {
+    const world = simulate(roleWorld('print(role(), hive_pos(), get_pos(), at_hive())\nwait(1000)', {}), 5);
+    expect(world.error).toBeNull();
+    expect(printed(world)).toContain('queen [2, 6] [2, 6] True');
+  });
+
+  it('the queen runs shared.bee first: its constants and functions work in queen.bee', () => {
+    const shared = 'RESERVE = 25\n\ndef rich():\n    return honey() >= RESERVE';
+    const world = roleWorld('print("reserve", RESERVE, "rich?", rich())\nwait(1000)', {}, SAY_AND_WAIT('forager here'), shared);
+    world.colony.honey = 30;
+    simulate(world, 5);
+    expect(world.error).toBeNull();
+    expect(printed(world)).toContain('reserve 25 rich? True');
+  });
+
+  it('a bee-only call in shared.bee stops the queen, and the error points at shared.bee', () => {
+    const world = simulate(roleWorld('wait(1000)', {}, SAY_AND_WAIT('forager here'), 'x = 1\nmove_to([3, 3])'), 5);
+    expect(world.error).toMatchObject({ file: 'shared', line: 2 });
+    expect(world.error?.message).toMatch(/keep it inside a function only bees call/);
   });
 
   it('every role can call functions from shared.bee', () => {

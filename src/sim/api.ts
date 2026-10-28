@@ -247,8 +247,14 @@ export function queenGlobals(colony: Colony): Record<string, Value> {
   };
   for (const name of WORKER_ONLY) {
     globals[name] = builtin(name, (_args, line) => {
-      throw new ScriptError(`The queen never leaves the hive or works; ${name}() is for worker bees, in forager.bee or another role's script.`, line);
+      throw new ScriptError(`The queen never leaves the hive or works; ${name}() is for worker bees. In shared.bee, keep it inside a function only bees call.`, line);
     });
   }
+  // what a bee could ask that has an answer for the queen too, so shared.bee's top lines work for her
+  const hive = () => [colony.hive.x, colony.hive.y];
+  globals.hive_pos = builtin('hive_pos', hive);
+  globals.get_pos = builtin('get_pos', hive);
+  globals.at_hive = builtin('at_hive', () => true);
+  globals.role = builtin('role', () => 'queen');
   return globals;
 }

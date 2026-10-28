@@ -56,7 +56,10 @@ export const BLOOMS: Record<Exclude<Season, 'winter'>, Bloom> = {
 };
 
 // the colony
-export const START_BEES = 1;
+export const START_BEES = 1; // in a World built for a test, lesson or docs clip
+export const START_HONEY = 10; // a new game's colony: no bees yet, and honey for one egg of any role
+/** How a new single player or multiplayer colony starts: the queen lays its first bee. */
+export const NEW_COLONY = { bees: 0, honey: START_HONEY };
 export const START_COMB = 10; // cells; every bee and every egg needs one
 export const COMB_LIMIT = 120;
 export const BEE_LIMIT = 120; // a safety ceiling for performance; comb is the real limit
@@ -536,7 +539,7 @@ export class Colony {
     this.programs = programs;
     this.world.error = null;
     if (this.queen) {
-      this.queen.runner = new Runner(programs.queen, queenGlobals(this));
+      this.queen.runner = queenRunner(this, programs);
       this.queen.action = null;
     }
     for (const bee of this.bees) {
@@ -915,9 +918,10 @@ export class World {
    * Founds a colony with a queen and its first bees on a free map (multiplayer), its hive at
    * HIVE_SPOT unless placed elsewhere. The caller checks the map is free and the hive can go there.
    */
-  found(programs: Programs, map: Tile, owner: string | null, hive?: Tile): Colony {
+  found(programs: Programs, map: Tile, owner: string | null, hive?: Tile, start = { bees: START_BEES, honey: 0 }): Colony {
     const colony = this.addColony(programs, map, owner, hive);
-    this.startColony(colony, START_BEES);
+    colony.honey = start.honey;
+    this.startColony(colony, start.bees);
     return colony;
   }
 
@@ -934,7 +938,7 @@ export class World {
   }
 
   private startColony(colony: Colony, bees: number): void {
-    colony.queen = { runner: new Runner(colony.programs!.queen, queenGlobals(colony)), action: null, laid: 0 };
+    colony.queen = { runner: queenRunner(colony, colony.programs!), action: null, laid: 0 };
     for (let i = 0; i < bees; i++) this.spawn(colony);
   }
 
@@ -1041,7 +1045,7 @@ export class World {
       for (const [key, marks] of cs.scents) c.scents.set(key, new Map(marks));
       c.eggs.push(...cs.eggs);
       c.log.push(...cs.log);
-      c.queen = cs.queen && { runner: new Runner(p.queen, queenGlobals(c)), action: null, laid: cs.queen.laid };
+      c.queen = cs.queen && { runner: queenRunner(c, p), action: null, laid: cs.queen.laid };
       for (const body of cs.bees) {
         // saves from before health existed: every bee at full health
         const maxHealth = body.maxHealth ?? (body.role === 'wasp' ? WASP_HEALTH : BEE_HEALTH);
@@ -1096,8 +1100,10 @@ export class World {
         const room = role === 'wasp' ? colony.nest !== null : colony.space > 0;
         const ok = room && colony.honey >= cost && colony.bees.length + colony.eggs.length < BEE_LIMIT;
         if (ok) {
+          // a brand-new colony's first egg hatches at once, so a new game doesn't open with nothing moving
+          const first = q.laid === 0 && colony.bees.length === 0 && colony.eggs.length === 0;
           colony.honey -= cost;
-          colony.eggs.push({ role, laidAt: this.tick, hatchAt: this.tick + HATCH_TICKS });
+          colony.eggs.push({ role, laidAt: this.tick, hatchAt: this.tick + (first ? 1 : HATCH_TICKS) });
           q.laid++;
           this.events.push({ type: 'lay', x: colony.hive.x, y: colony.hive.y });
         }
@@ -1107,8 +1113,9 @@ export class World {
         q.action = { kind: 'wait', left: result.args[0] as number };
       }
     } else if (result.type === 'error') {
-      if (this.haltOnError) this.error = { message: result.error.message, line: result.error.line, file: 'queen', beeId: null };
-      colony.say('queen', `queen.bee line ${result.error.line}: ${result.error.message}`, 'error');
+      const at = locate('queen', result.error.line); // shared.bee runs ahead of queen.bee
+      if (this.haltOnError) this.error = { message: result.error.message, line: at.line, file: at.file, beeId: null };
+      colony.say('queen', `${at.file}.bee line ${at.line}: ${result.error.message}`, 'error');
     } else if (result.type === 'done') {
       colony.say('queen', 'Reached the end of her script and stopped. The colony will not grow.', 'note');
     }
@@ -1785,6 +1792,11 @@ function markScent(colony: Colony, at: Tile, scent: string, tick: number): void 
   const key = tileKey(at.x, at.y);
   if (!colony.scents.has(key)) colony.scents.set(key, new Map());
   colony.scents.get(key)!.set(scent, tick);
+}
+
+/** The queen's runner: shared.bee first, so its constants and functions exist for her too, then queen.bee. */
+function queenRunner(colony: Colony, programs: Programs): Runner {
+  return new Runner([...(programs.shared ?? []), ...programs.queen], queenGlobals(colony));
 }
 
 const RIGHT_OF: Record<Dir, Dir> = { north: 'east', east: 'south', south: 'west', west: 'north' };

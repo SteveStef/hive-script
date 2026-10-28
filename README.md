@@ -40,7 +40,9 @@ npm run bench          # time a full 25-colony world, to check ticks stay well u
 
 Sign up, then pick **Single player**, **Multiplayer** or **Tutorial** from the menu. A new
 account starts with short scripts (`src/defaultScript.ts`) that gather honey and hatch bees but,
-on purpose, let the colony die out in its first autumn: keeping it alive is the player's job. The
+on purpose, let the colony die out in its first autumn: keeping it alive is the player's job. A new
+game's colony (single player, or a newly founded multiplayer one) starts with no bees and 10 honey
+(`NEW_COLONY`): the queen lays the first bee, of any role, and that first egg hatches at once. The
 tutorial is 14 hands-on lessons, from your first bee to wasps and raids: each gives a goal the
 game checks as your code runs, with hints and a **Show me** solution. Lessons run their own
 starter scripts in small fixed worlds (the multiplayer ones in a two-map practice world on
@@ -105,9 +107,10 @@ A colony runs a script per role, each in its own editor tab:
 - **Custom roles**: **+ Role** adds up to 5 more (builder.bee, nurse.bee...). A role is
   just a script; bees hatch into the role the queen names with `lay("builder")` and keep it
   for life. `role()`, `roles()` and `role_count()` let scripts ask about them.
-- **shared.bee**: functions every worker role can use. It runs ahead of each role's script
+- **shared.bee**: functions and constants every script can use, the queen's too. It runs ahead of each script
   in the same `Runner`, with its lines numbered from `SHARED_LINE_BASE` so errors and the
-  line highlight can tell the files apart (`locate()` in `world.ts`).
+  line highlight can tell the files apart (`locate()` in `world.ts`). The queen gets read-only
+  `hive_pos()`, `get_pos()`, `at_hive()` and `role()` ("queen"); other bee-only calls stop her with a hint.
 - **queen.bee**: the queen stays in the hive and decides when to lay eggs, and of which role.
 
 Press **Run** (or Ctrl+Enter). Click a bee, the hive, or a name in the bee list to follow it:

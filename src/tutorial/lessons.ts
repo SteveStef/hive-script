@@ -173,7 +173,8 @@ export const LESSONS: Lesson[] = [
     topic: 'Growing the colony',
     title: 'The queen',
     intro: `
-      <p>One bee won't go far. The queen runs <b>queen.bee</b>: she never leaves the hive, and ${fn('lay')} spends 10 honey on an egg that hatches into a worker after 300 ticks.</p>
+      <p>One bee won't go far. The queen runs <b>queen.bee</b>: she never leaves the hive, and ${fn('lay')} spends 10 honey on an egg that hatches into a worker after 300 ticks.
+      A new game's colony starts with no bees and 10 honey, so the queen chooses its first bee, and that first egg hatches at once. (This lesson starts you off with one forager.)</p>
       <p>Every bee and egg needs a cell of comb. ${fn('space')} says how many are free, and ${fn('honey')} what's in store. ${code('lay()')} returns False when she can't afford it.
       Each egg shows in the comb in front of the hive: an egg, then a grub, then a cap just before it hatches.</p>
       <p>The forager already works. <b>Do this:</b> grow the colony to 3 bees.</p>`,
@@ -277,7 +278,8 @@ export const LESSONS: Lesson[] = [
     topic: 'Advanced tools',
     title: 'shared.bee',
     intro: `
-      <p>Code every role needs belongs in <b>shared.bee</b>: it runs ahead of each worker role's script, so a function defined there works in all of them.</p>
+      <p>Code every role needs belongs in <b>shared.bee</b>: it runs ahead of every script, the queen's too, so a function or constant defined there works in all of them.
+      The queen never leaves the hive, so bee-only calls like ${code('move_to()')} belong inside functions only bees call.</p>
       <p>Both forager.bee and scout.bee here start with the same ${code('report()')} function. <b>Do this:</b> move ${code('report()')} into shared.bee, delete the copies, and keep both roles calling it.</p>`,
     tabs: ['forager', 'shared', 'queen'],
     starter: {

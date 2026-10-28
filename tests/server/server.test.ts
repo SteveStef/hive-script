@@ -194,13 +194,24 @@ describe('the shared world', () => {
 
   it('frees the map of a colony that died out, so its player can pick again', async () => {
     const cookie = await signup('shortlived');
-    await start(cookie, { x: 1, y: 1 }, set({ forager: 'die()', queen: 'while True:\n    wait(100)' }));
-    await ticks(3);
+    // a new colony has no bees and 10 honey: the queen's one egg hatches at once into a bee that quits
+    await start(cookie, { x: 1, y: 1 }, set({ forager: 'die()', queen: 'lay()\nwhile True:\n    wait(100)' }));
+    await ticks(40);
     expect((await app.inject({ url: '/api/colony', ...as(cookie) })).json().exists).toBe(false);
     const view = (await app.inject({ url: '/api/world', ...as(cookie) })).json();
     expect(view.fallen).toMatch(/died out/);
     expect(view.maps.every((m: { owner: string | null }) => m.owner === null)).toBe(true);
     expect((await start(cookie, { x: 1, y: 1 })).statusCode).toBe(200);
+  });
+
+  it('a new colony starts with no bees and 10 honey, and its first bee hatches at once', async () => {
+    const cookie = await signup('freshhive');
+    await start(cookie, { x: 2, y: 2 }, set({ queen: 'lay()\nwhile True:\n    wait(100)' }));
+    const before = (await app.inject({ url: '/api/world', ...as(cookie) })).json().maps.find((m: { mine: boolean }) => m.mine);
+    expect([before.bees, before.honey]).toEqual([0, 10]);
+    await ticks(40);
+    const after = (await app.inject({ url: '/api/world', ...as(cookie) })).json().maps.find((m: { mine: boolean }) => m.mine);
+    expect([after.bees, after.honey]).toEqual([1, 0]);
   });
 
   it('a restarted server picks every world up where it was saved', async () => {

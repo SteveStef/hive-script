@@ -10,7 +10,7 @@ import { insideHive, Renderer, roleColor } from './render/renderer';
 import { TILE } from './render/scenery';
 import { parseScripts, type ScriptProblem, type ScriptSet } from './sim/scripts';
 import { RemoteColony, type BeeView, type ColonyJson, type ColonyView } from './sim/view';
-import { COLS, HIVE_SPOT, hiveProblem, locate, MAX_ENERGY, MAX_ROLES, RESERVED_NAMES, ROLE_NAME, ROWS, SEASON_TICKS, tileKey, World, type LogLine, type ScriptFile, type Tile } from './sim/world';
+import { COLS, HIVE_SPOT, hiveProblem, locate, MAX_ENERGY, MAX_ROLES, NEW_COLONY, RESERVED_NAMES, ROLE_NAME, ROWS, SEASON_TICKS, tileKey, World, type LogLine, type ScriptFile, type Tile } from './sim/world';
 import { beeCard, beeStatus, queenCard, queenStatus } from './ui/beeCard';
 import { confirmDialog, promptDialog } from './ui/dialog';
 import { createEditor } from './ui/editor';
@@ -319,7 +319,7 @@ function start(): void {
     met = lesson.goals.map(() => false);
     panel.goals(met);
   } else {
-    local = new World(parsed.programs, seed, { hive: local.colony.hive });
+    local = new World(parsed.programs, seed, { hive: local.colony.hive, ...NEW_COLONY }); // no bees yet: the queen lays the first
     placing = null;
     local.colony.say(null, `Meadow #${seed}: flowers bloom in new places every season, and every game is a new meadow.`, 'note');
     seed = newSeed(); // the next Run or Restart grows a different meadow
@@ -1252,8 +1252,9 @@ function updateHud(w: ColonyView): void {
 
   let card: string;
   if (selected === 'queen' && w.queen) {
-    editor.setActiveLine(w.queen.runner.finished ? null : 'queen', w.queen.runner.line || null);
-    card = queenCard(w, sourceLines.queen ?? []);
+    const at = locate('queen', w.queen.runner.line);
+    editor.setActiveLine(w.queen.runner.finished ? null : at.file, w.queen.runner.line ? at.line : null);
+    card = queenCard(w, sourceLines);
   } else {
     const bee = w.findBee(typeof selected === 'number' ? selected : null);
     const at = bee && !bee.death && !bee.runner.finished && bee.runner.line ? locate(bee.role, bee.runner.line) : null;
