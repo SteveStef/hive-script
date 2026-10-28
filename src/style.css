@@ -394,6 +394,7 @@ body.focus-code .layout, body.focus-game .layout { grid-template-columns: minmax
 .world-close[hidden] { display: none; }
 .world-text { margin: 0; font-size: 12px; line-height: 1.5; color: #4a3218; }
 .world-text.fallen { color: #a8321e; }
+.world-warn { display: block; margin-top: 6px; padding: 4px 8px; border-radius: 4px; background: #fbe3c4; color: #8a3a10; font-weight: 600; }
 .world-problem { margin: 0; min-height: 1em; font-size: 12px; color: #a8321e; }
 .world-foot { display: flex; justify-content: flex-end; }
 .world-grid { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 4px; padding: 4px; background: var(--honey-ink); }

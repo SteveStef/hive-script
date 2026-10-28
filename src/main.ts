@@ -623,7 +623,31 @@ function renderWorld(): void {
   text.textContent = colonyExists
     ? `${held} of ${w.maps.length} maps are held. Click any map to watch it; yours is outlined in honey. Your bees can fly onto any map.`
     : `${w.fallen ? `${w.fallen} ` : ''}World #${w.world} has ${w.maps.length - held} free maps. Every map grows its own flowers, and bees can forage across the borders, so neighbors share the meadow. Pick a free map to found your colony on the scripts in your tabs, or click a held one to watch it.`;
+  const winter = colonyExists ? null : winterWarning(w.tick);
+  if (winter) {
+    const warn = document.createElement('span');
+    warn.className = 'world-warn';
+    warn.textContent = winter;
+    text.append(warn);
+  }
   renderWorldGrid(worldGrid, w, remote.map, cell => void pickMap(cell));
+}
+
+/**
+ * A warning when a colony founded now would most likely starve: it starts with 10 honey and no
+ * bees, and nothing blooms in winter. Founded from late autumn until late winter, colonies
+ * usually die before spring; later in winter the first bee hatches fed and lasts until the clover.
+ */
+function winterWarning(tick: number): string | null {
+  const toSpring = SEASON_TICKS * 4 - (tick % (SEASON_TICKS * 4));
+  if (toSpring > SEASON_TICKS * 1.4 || toSpring < SEASON_TICKS * 0.25) return null;
+  const minutes = (ticks: number) => {
+    const m = Math.max(1, Math.round((ticks * tickMs) / 60000));
+    return `about ${m} minute${m === 1 ? '' : 's'}`;
+  };
+  return toSpring > SEASON_TICKS
+    ? `Winter starts in ${minutes(toSpring - SEASON_TICKS)}, and nothing blooms then: a colony founded now has little time to store honey and usually starves before spring, which is ${minutes(toSpring)} away.`
+    : `It's winter, and nothing blooms until spring, ${minutes(toSpring)} away: a colony founded now usually starves before then.`;
 }
 
 /** How the server says a colony ended when its player abandoned it. */
@@ -665,10 +689,12 @@ async function pickMap(cell: MapCell): Promise<void> {
 
 /** Founds the colony on a map with its hive on a tile, after asking. */
 async function found(map: Tile, hive: Tile): Promise<void> {
+  const winter = winterWarning(view().tick);
   const sure = await confirmDialog({
     title: `Put your hive on [${hive.x}, ${hive.y}]?`,
-    message: `Your colony is founded on map [${map.x}, ${map.y}]: the queen and first forager move in, running the scripts in your tabs. The hive stays here, and the colony keeps working while you're away, until it dies out.`,
-    confirmLabel: 'Found it here',
+    message: `Your colony is founded on map [${map.x}, ${map.y}]: the queen and first forager move in, running the scripts in your tabs. The hive stays here, and the colony keeps working while you're away, until it dies out.${winter ? ` ${winter}` : ''}`,
+    confirmLabel: winter ? 'Found it anyway' : 'Found it here',
+    danger: !!winter,
   });
   if (!sure) return;
   editor.setError(null);

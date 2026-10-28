@@ -62,7 +62,7 @@ export const API_DOCS: ApiDoc[] = [
   { name: 'mark', signature: 'mark(name)', insert: 'mark("${1:food}")', only: 'worker',
     doc: `Leave a scent called name, like "food" or "danger", on the tile you are on (${MARK_TICKS} ticks). It fades away over ${SCENT_LIFE} ticks; marking again makes it fresh.` },
   { name: 'smell', signature: 'smell(name)', insert: 'smell("${1:food}")', only: 'worker',
-    doc: `Position of the tile within ${SMELL_RANGE} tiles where that scent is strongest, or None if you can't smell it. Scent carries twice as far as a bee can see.` },
+    doc: `Position of the tile within ${SMELL_RANGE} tiles where that scent is strongest, or None if you can't smell it. Scent carries ${SMELL_RANGE / SENSE_RANGE} times as far as a bee can see.` },
   { name: 'smell_here', signature: 'smell_here(name)', insert: 'smell_here("${1:food}")', only: 'worker',
     doc: `How strong that scent is on your tile: ${SCENT_MAX} when just marked, fading to 0.` },
 
