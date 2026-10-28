@@ -32,10 +32,10 @@ export const LAY_TICKS = 30;
 export const BUMP_TICKS = 3; // flying into the edge of the map or another bee
 export const MAX_BLOCKED_TICKS = 18; // ticks one move_to() may spend blocked, in total, before giving up
 export const MAX_WAIT = 3000;
-export const MARK_TICKS = 4;
+export const MARK_TICKS = 1; // leaving scent is quick, so sharing a find costs almost nothing
 
 // scent
-export const SCENT_LIFE = 900; // ticks a mark lasts (1 minute at 1x); it fades evenly to nothing
+export const SCENT_LIFE = 2400; // ticks a mark lasts, most of a season (2:40 at 1x); it fades evenly to nothing
 export const SCENT_MAX = 100; // a fresh mark's strength
 export const SCENT_NAME_MAX = 20; // characters in a scent's name, like "food" or "danger"
 
@@ -50,9 +50,10 @@ export interface Bloom {
   nectar: number; // what each flower holds when full
 }
 export const BLOOMS: Record<Exclude<Season, 'winter'>, Bloom> = {
-  spring: { kind: 'clover', patches: 4, size: [3, 4], near: 2, far: 7, nectar: 3 }, // small patches close to home
-  summer: { kind: 'lavender', patches: 7, size: [3, 5], near: 2, far: 18, nectar: 3 }, // all over the meadow
-  autumn: { kind: 'goldenrod', patches: 3, size: [4, 5], near: 7, far: 18, nectar: 5 }, // few, far out, but rich
+  // fewer, richer patches than bees can see from home: finding them is part of the game
+  spring: { kind: 'clover', patches: 3, size: [3, 4], near: 4, far: 10, nectar: 5 }, // a few patches around home
+  summer: { kind: 'lavender', patches: 5, size: [3, 5], near: 4, far: 18, nectar: 5 }, // across the meadow, refilling fast
+  autumn: { kind: 'goldenrod', patches: 3, size: [4, 6], near: 9, far: 18, nectar: 8 }, // few, far out, but rich
 };
 
 // the colony
@@ -105,6 +106,10 @@ export const NEST_SPOT = { x: 12, y: 5 }; // where a nest hangs inside its map
 export const NEST_HEALTH = 60;
 export const NEST_WASPS = 4; // wild wasps a nest keeps
 export const NEST_SPAWN_TICKS = 600; // ticks between new wild wasps, while it has fewer than NEST_WASPS
+export const VISITOR_CHANCE = 0.5; // single player: the chance a lone wild wasp arrives as a season with flowers starts
+export const VISITOR_KILLS = 5; // bees a visitor stings to death before it's had its fill and flies off
+export const VISITOR_REST = 300; // ticks a visitor rests (eats) after each kill
+export const VISITOR_PATIENCE = 600; // ticks a visitor hunts without a kill before it gives up and flies off
 export const WILD_WANDER = 6; // tiles from the nest a wild wasp roams when it sees no one (never off the nest's map)
 
 // seasons
@@ -112,8 +117,8 @@ export const SEASONS = ['spring', 'summer', 'autumn', 'winter'] as const;
 export type Season = (typeof SEASONS)[number];
 export const SEASON_TICKS = 2700; // 3 minutes at 1x; a year is four seasons
 /** Ticks for a flower to regrow one nectar; nothing grows in winter. */
-export const REGEN_TICKS: Record<Season, number> = { spring: 240, summer: 160, autumn: 360, winter: Infinity };
-export const WINTER_IDLE = 0.06; // keeping warm burns energy even at rest
+export const REGEN_TICKS: Record<Season, number> = { spring: 130, summer: 80, autumn: 260, winter: Infinity };
+export const WINTER_IDLE = 0.12; // keeping warm burns energy even at rest: about 8 honey per bee over a winter
 export const WINTER_FLIGHT = 2; // flying costs twice as much in the cold
 export const WINTER_AGING = 0.5; // resting in the winter cluster, bees age at half speed
 
@@ -206,6 +211,11 @@ export interface Nest extends Tile {
   spawnIn: number; // ticks until the next wild wasp, while there are fewer than NEST_WASPS
   /** Where each wild wasp is wandering to, by wasp id. */
   roam: Record<number, Tile>;
+  /**
+   * A lone wild wasp visiting single player's meadow, not a real nest: nothing is drawn or can be
+   * stung here, the tile is just its anchor (the map's middle, or the edge it's leaving by).
+   */
+  visitor?: { leaving: boolean; kills: number; lastKill: number }; // lastKill: the tick of its last kill, or its arrival
 }
 
 /** The queen never leaves the hive and never dies; her script decides when to lay. */
@@ -282,6 +292,8 @@ export interface WorldOptions {
   hedges?: boolean;
   /** With maps: still found single player's colony on map [0, 0] (the docs' clips of a hedged world). */
   home?: boolean;
+  /** Single player: now and then a lone wild wasp visits for a season (VISITOR_CHANCE). */
+  visitors?: boolean;
   /** Where single player's hive sits, if not at HIVE_SPOT. */
   hive?: Tile;
 }
@@ -457,7 +469,7 @@ export class Colony {
   }
   /** Every nest on the map on screen: wild ones, and colonies' own (this one's included). */
   get nests(): { x: number; y: number; health: number; maxHealth: number; owner: string | null; wild: boolean }[] {
-    const wild = this.world.nests.map(({ x, y, health, maxHealth }) => ({ x, y, health, maxHealth, owner: null, wild: true }));
+    const wild = this.world.nests.filter(n => !n.visitor).map(({ x, y, health, maxHealth }) => ({ x, y, health, maxHealth, owner: null, wild: true }));
     const owned = this.world.colonies.flatMap(c => (c.nest ? [{ ...c.nest, owner: c.owner, wild: false }] : []));
     return [...wild, ...owned].filter(n => this.onMap(n));
   }
@@ -614,6 +626,8 @@ export class World {
   private nextNestId = 1;
   /** Nests destroyed this year; each hangs again on a free map next spring. */
   private nestsToRegrow = 0;
+  /** Single player: lone wild wasps may visit. */
+  private readonly visitorsOn: boolean;
   private readonly fixedFlowers: [number, number][] | null;
   private flowerIndex = new Map<number, Flower>();
   private indexed: Flower[] | null = null;
@@ -630,6 +644,7 @@ export class World {
     this.width = this.maps[0] * COLS;
     this.height = this.maps[1] * ROWS;
     this.fixedFlowers = options.flowers ?? null;
+    this.visitorsOn = !!options.visitors;
     this.tick = options.tick ?? 0;
     const layout = options.hedges ? hedgeLayout(seed, this.maps) : { hedges: new Set<number>(), gates: [] };
     this.hedges = layout.hedges;
@@ -816,7 +831,7 @@ export class World {
   }
 
   nestAt(tile: Tile): Nest | null {
-    return this.nests.find(n => n.x === tile.x && n.y === tile.y) ?? null;
+    return this.nests.find(n => !n.visitor && n.x === tile.x && n.y === tile.y) ?? null;
   }
 
   /** The colony whose own wasp nest is on a tile, if any. */
@@ -826,7 +841,7 @@ export class World {
 
   /** The wild nest hanging on a map, if any. */
   nestOn(map: Tile): Nest | null {
-    return this.nests.find(n => this.mapAt(n).x === map.x && this.mapAt(n).y === map.y) ?? null;
+    return this.nests.find(n => !n.visitor && this.mapAt(n).x === map.x && this.mapAt(n).y === map.y) ?? null;
   }
 
   /**
@@ -1012,11 +1027,12 @@ export class World {
     this.flowers = this.grow();
     const s = this.season;
     const text =
-      s === 'spring' ? `Spring, year ${this.year}: clover is blooming in small patches near the hive.`
+      s === 'spring' ? `Spring, year ${this.year}: clover is blooming in a few patches around the hive.`
       : s === 'summer' ? 'Summer: the clover is over, and lavender blooms all across the meadow. Flowers regrow fastest now.'
       : s === 'autumn' ? 'Autumn: the last flowers, goldenrod, grow in a few rich patches far from the hive. Store honey for winter.'
       : 'Winter: the flowers are gone until spring, and keeping warm burns more energy.';
     for (const c of this.colonies) if (c.running) c.say(null, text, 'season');
+    if (this.visitorsOn) this.visitorsAtSeason(s);
     if (s === 'spring') {
       // destroyed nests hang again, each on a free map
       for (let n = this.nestsToRegrow; n > 0; n--) if (this.hangNest()) this.nestsToRegrow--;
@@ -1513,9 +1529,18 @@ export class World {
     this.events.push({ type: 'hit', id: unit.id, x: unit.x, y: unit.y });
     if (unit.health > 0) return;
     const by = from ? `${from.name}'s ${attacker.role === 'wasp' ? 'wasp' : 'bee'} #${attacker.id}` : 'a wild wasp';
-    if (colony) this.die(colony, unit, 'stung', by);
-    else if (nest) {
+    if (colony) {
+      this.die(colony, unit, 'stung', by);
+      const visit = from ? null : this.nests.find(n => n.visitor && n.wasps.includes(attacker));
+      if (visit?.visitor) {
+        // a visitor eats what it caught, and after a few has had its fill
+        attacker.action = { kind: 'wait', left: VISITOR_REST };
+        visit.visitor.lastKill = this.tick + VISITOR_REST;
+        if (++visit.visitor.kills >= VISITOR_KILLS) this.sendOff(visit);
+      }
+    } else if (nest) {
       nest.wasps.splice(nest.wasps.indexOf(unit), 1);
+      if (nest.visitor && !nest.wasps.length) this.nests.splice(this.nests.indexOf(nest), 1); // the visitor is gone
       delete nest.roam[unit.id];
       this.events.push({ type: 'death', id: unit.id, role: 'wasp', x: unit.x, y: unit.y, facing: unit.facing, cause: 'stung' });
     }
@@ -1554,6 +1579,12 @@ export class World {
   }
 
   private stepNest(nest: Nest): void {
+    if (nest.visitor) {
+      // bees that keep out of reach wear it out: no kill for a while and it gives up
+      if (this.tick - nest.visitor.lastKill > VISITOR_PATIENCE) this.sendOff(nest);
+      for (const w of [...nest.wasps]) this.stepWild(nest, w);
+      return;
+    }
     if (nest.wasps.length < NEST_WASPS && this.season !== 'winter' && --nest.spawnIn <= 0) {
       this.spawnWild(nest);
       nest.spawnIn = NEST_SPAWN_TICKS;
@@ -1575,9 +1606,16 @@ export class World {
         if (--a.left > 0) return;
         if (a.kind === 'sting') this.strike(w, null, a.target);
       }
-      w.action = null;
+      if (w.action === a) w.action = null;
+      if (w.action) return; // a visitor resting after a kill
     }
     const home = { x: nest.x, y: nest.y };
+    if (nest.visitor?.leaving) {
+      // its season is over: off the meadow by the nearest edge
+      if (w.x === home.x && w.y === home.y) this.removeVisitor(nest, 'The wild wasp flew off.');
+      else this.stepToward(w, home);
+      return;
+    }
     if (this.season === 'winter') {
       if (w.x !== home.x || w.y !== home.y) this.stepToward(w, home);
       else w.action = { kind: 'wait', left: 60 };
@@ -1615,8 +1653,9 @@ export class World {
       }
       const x0 = nestMap.x * COLS;
       const y0 = nestMap.y * ROWS;
-      const x = Math.max(x0, Math.min(x0 + COLS - 1, nest.x + Math.floor(this.rng() * (WILD_WANDER * 2 + 1)) - WILD_WANDER));
-      const y = Math.max(y0, Math.min(y0 + ROWS - 1, nest.y + Math.floor(this.rng() * (WILD_WANDER * 2 + 1)) - WILD_WANDER));
+      const wander = nest.visitor ? COLS : WILD_WANDER; // a visitor roams the whole meadow
+      const x = Math.max(x0, Math.min(x0 + COLS - 1, nest.x + Math.floor(this.rng() * (wander * 2 + 1)) - wander));
+      const y = Math.max(y0, Math.min(y0 + ROWS - 1, nest.y + Math.floor(this.rng() * (wander * 2 + 1)) - wander));
       if (this.blocked({ x, y })) {
         w.action = { kind: 'wait', left: BUMP_TICKS }; // a spot in the hedge: pick again soon
         return;
@@ -1624,6 +1663,63 @@ export class World {
       spot = nest.roam[w.id] = { x, y };
     }
     if (!this.stepToward(w, spot)) delete nest.roam[w.id]; // blocked: pick somewhere else next time
+  }
+
+  /**
+   * Single player, as a season starts: a visitor still here flies off, and in a season with flowers
+   * (never the first spring, which isn't a season change) a new one may arrive at the meadow's edge.
+   */
+  private visitorsAtSeason(season: Season): void {
+    for (const n of this.nests) if (n.visitor) this.sendOff(n);
+    if (season === 'winter' || this.nests.some(n => n.visitor) || this.rng() >= VISITOR_CHANCE) return;
+    const colony = this.colonies[0];
+    if (!colony) return;
+    const x0 = colony.map.x * COLS;
+    const y0 = colony.map.y * ROWS;
+    const sides: [string, () => Tile][] = [
+      ['east', () => ({ x: x0 + COLS - 1, y: y0 + Math.floor(this.rng() * ROWS) })],
+      ['west', () => ({ x: x0, y: y0 + Math.floor(this.rng() * ROWS) })],
+      ['north', () => ({ x: x0 + Math.floor(this.rng() * COLS), y: y0 })],
+      ['south', () => ({ x: x0 + Math.floor(this.rng() * COLS), y: y0 + ROWS - 1 })],
+    ];
+    const [side, pick] = sides[Math.floor(this.rng() * sides.length)];
+    let at: Tile | null = null;
+    for (let tries = 0; tries < 10 && !at; tries++) {
+      const t = pick();
+      if (!this.blocked(t) && !this.taken(t) && !this.isHive(t)) at = t;
+    }
+    if (!at) return;
+    // its anchor is the middle of the meadow, so it roams all of it
+    const nest: Nest = {
+      id: this.nextNestId++, x: x0 + (COLS >> 1), y: y0 + (ROWS >> 1), health: NEST_HEALTH, maxHealth: NEST_HEALTH,
+      wasps: [], spawnIn: 0, roam: {}, visitor: { leaving: false, kills: 0, lastKill: this.tick },
+    };
+    this.spawnWild(nest);
+    [nest.wasps[0].x, nest.wasps[0].y] = [at.x, at.y];
+    this.nests.push(nest);
+    for (const c of this.colonies) if (c.running) c.say(null, `A wild wasp flew onto the meadow from the ${side}. It stings bees out in the open; the hive is safe.`, 'season');
+  }
+
+  /** A visitor heads for the nearest edge of its map, and leaves once it's there. */
+  private sendOff(n: Nest): void {
+    const w = n.wasps[0];
+    if (!n.visitor || n.visitor.leaving || !w) return;
+    const map = this.mapAt(w);
+    const x0 = map.x * COLS;
+    const y0 = map.y * ROWS;
+    const ways: Tile[] = [{ x: x0, y: w.y }, { x: x0 + COLS - 1, y: w.y }, { x: w.x, y: y0 }, { x: w.x, y: y0 + ROWS - 1 }];
+    const out = ways.reduce((a, b) => (Math.abs(b.x - w.x) + Math.abs(b.y - w.y) < Math.abs(a.x - w.x) + Math.abs(a.y - w.y) ? b : a));
+    n.visitor.leaving = true;
+    n.x = out.x;
+    n.y = out.y;
+    delete n.roam[w.id];
+  }
+
+  /** A visitor leaves the meadow (or the world), with a note in every colony's log. */
+  private removeVisitor(nest: Nest, note: string): void {
+    const i = this.nests.indexOf(nest);
+    if (i >= 0) this.nests.splice(i, 1);
+    for (const c of this.colonies) if (c.running) c.say(null, note, 'season');
   }
 
   /** One tile toward a target, along whichever way is free; waits a moment when both are blocked. */
@@ -1635,7 +1731,7 @@ export class World {
     const options = Math.abs(t.x - w.x) >= Math.abs(t.y - w.y) ? [dx ? xs : null, dy ? ys : null] : [dy ? ys : null, dx ? xs : null];
     if (this.hedges.size) options.unshift(this.plan(w, t)[0] ?? null); // the way around a hedge comes first
     for (const next of options) {
-      if (!next || this.blocked(next) || this.taken(next, w)) continue;
+      if (!next || this.blocked(next) || this.taken(next, w) || this.isHive(next)) continue; // wild wasps keep out of hives
       const a: MoveAction = { kind: 'move', path: [next], target: next, stepLeft: 0, moving: false, waited: 0, single: true };
       w.action = a;
       this.claim(w, a);

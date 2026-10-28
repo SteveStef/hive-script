@@ -1,7 +1,7 @@
 import { DEFAULT_SHARED } from '../defaultScript';
 import { parse } from '../lang/parser';
 import type { ScriptSet } from '../sim/scripts';
-import { SEASON_TICKS, World, type Programs, type ScriptFile, type WorldOptions } from '../sim/world';
+import { SCENT_LIFE, SEASON_TICKS, World, type Programs, type ScriptFile, type WorldOptions } from '../sim/world';
 
 /** One goal of a lesson, checked against the running world after every tick. */
 export interface Goal {
@@ -220,7 +220,7 @@ export const LESSONS: Lesson[] = [
     solution: {
       forager: 'while True:\n    if energy() < 30:\n        go_home()\n        eat()\n    elif season() == "winter":\n        go_home()\n        wait(30)  # rest in the hive until spring\n    else:\n        f = nearest_flower()\n        if f:\n            move_to(f)\n            collect()\n            go_home()\n            deposit()\n        else:\n            move_to([2 + random(15), random(12)])\n',
     },
-    world: programs => new World(programs, 7, { tick: SEASON_TICKS * 3 - 500, bees: 3, honey: 14 }),
+    world: programs => new World(programs, 7, { tick: SEASON_TICKS * 3 - 500, bees: 3, honey: 30 }),
     goals: [
       { text: 'Reach spring', check: w => w.tick >= SEASON_TICKS * 4 },
       { text: 'With at least one bee alive', check: w => w.tick >= SEASON_TICKS * 4 && w.colony.bees.length > 0 },
@@ -237,7 +237,7 @@ export const LESSONS: Lesson[] = [
     title: 'Scent',
     intro: `
       <p>A bee sees flowers only 6 tiles away, and scripts can't share variables: every bee has its own copy. Bees share what they know with scent.
-      ${fn('mark', '"food"')} scents the bee's tile, and ${fn('smell', '"food"')} finds the strongest mark within 12 tiles. Marks fade in 900 ticks.</p>
+      ${fn('mark', '"food"')} scents the bee's tile, and ${fn('smell', '"food"')} finds the strongest mark within 12 tiles. Marks fade over ${SCENT_LIFE} ticks, most of a season, and leaving one takes just a tick.</p>
       <p>The flowers here are out of sight of the hive. <b>Do this:</b> have your bees mark the flowers they find, and follow the scent.</p>`,
     tabs: ['forager'],
     starter: { forager: 'while True:\n    f = nearest_flower()\n    if f:\n        move_to(f)\n        collect()\n        go_home()\n        deposit()\n    else:\n        move_to([2 + random(15), random(12)])\n' },
@@ -361,7 +361,7 @@ export const LESSONS: Lesson[] = [
       <p>Wasps have 30 health (bees 10), can't collect, and ${fn('sting', 'position')} an enemy on the tile right next to them for 5 damage. ${fn('enemies_near')} lists enemies in sight.
       A raider has to land on your hive for 10 ticks to steal: a wasp standing beside the hive has time to sting twice.
       Worker bees can ${fn('sting', 'position')} too, but only once: it does 10 damage, and the bee dies doing it.
-      While a raider sits on your hive, a red banner over the meadow says so. Wasps grow old like bees, so in a real game the queen keeps replacing them.</p>
+      While a raider sits on your hive, a red banner over the meadow says so. In single player there are no raiders, but now and then a lone wild wasp visits for a season and hunts bees in the open. Wasps grow old like bees, so in a real game the queen keeps replacing them.</p>
       <p><b>Do this:</b> you've saved 200 honey. Build a nest, lay a wasp, and make wasp.bee guard the hive until it stings a raider to death.</p>`,
     tabs: ['queen', 'wasp'],
     starter: { queen: 'while True:\n    wait(100)\n', wasp: '# wasp.bee: every wasp runs this.\nwhile True:\n    wait(100)\n' },

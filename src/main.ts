@@ -319,7 +319,7 @@ function start(): void {
     met = lesson.goals.map(() => false);
     panel.goals(met);
   } else {
-    local = new World(parsed.programs, seed, { hive: local.colony.hive, ...NEW_COLONY }); // no bees yet: the queen lays the first
+    local = new World(parsed.programs, seed, { hive: local.colony.hive, ...NEW_COLONY, visitors: true }); // no bees yet: the queen lays the first; now and then a wild wasp visits
     placing = null;
     local.colony.say(null, `Meadow #${seed}: flowers bloom in new places every season, and every game is a new meadow.`, 'note');
     seed = newSeed(); // the next Run or Restart grows a different meadow

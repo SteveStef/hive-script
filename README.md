@@ -40,7 +40,10 @@ npm run bench          # time a full 25-colony world, to check ticks stay well u
 
 Sign up, then pick **Single player**, **Multiplayer** or **Tutorial** from the menu. A new
 account starts with short scripts (`src/defaultScript.ts`) that gather honey and hatch bees but,
-on purpose, let the colony die out in its first autumn: keeping it alive is the player's job. A new
+on purpose, let the colony die out in its first autumn: keeping it alive is the player's job. In
+single player, from summer of year 1, about half the seasons with flowers bring a lone wild wasp
+(`VISITOR_CHANCE`): it hunts bees in the open, never the hive, and flies off after 5 kills, when it
+catches nobody for a while, or at the season's end. A new
 game's colony (single player, or a newly founded multiplayer one) starts with no bees and 10 honey
 (`NEW_COLONY`): the queen lays the first bee, of any role, and that first egg hatches at once. The
 tutorial is 14 hands-on lessons, from your first bee to wasps and raids: each gives a goal the
@@ -191,7 +194,7 @@ Key ideas:
   3,600–5,400 ticks of aging.
 - **Scent is how bees share what they know.** `mark("food")` scents the bee's own tile;
   any bee can `smell("food")` the strongest mark within 12 tiles (twice its sight), or read
-  its own tile with `smell_here()`. Marks fade over 900 ticks and show on the meadow, one color per name.
+  its own tile with `smell_here()`. Marks fade over 2,400 ticks (most of a season), take a tick to leave, and show on the meadow, one color per name.
   Each colony smells only its own marks, so in multiplayer scent is private.
 - **Fights.** A sting does 5 damage; a bee has 10 health and a wasp 30. Wild wasps follow a
   small built-in mind (`stepWild()` in `world.ts`) instead of a script: they chase enemies

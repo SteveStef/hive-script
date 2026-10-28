@@ -154,7 +154,7 @@ export function toJson(world: World, colony: Colony | null, map: Tile, logTail =
   const nests: NestView[] = [];
   for (const c of world.colonies) if (c.nest && onMap(map, c.nest)) nests.push({ ...c.nest, owner: c.owner, wild: false });
   for (const n of world.nests) {
-    if (onMap(map, n)) nests.push({ x: n.x, y: n.y, health: n.health, maxHealth: n.maxHealth, owner: null, wild: true });
+    if (onMap(map, n) && !n.visitor) nests.push({ x: n.x, y: n.y, health: n.health, maxHealth: n.maxHealth, owner: null, wild: true });
     for (const { runner: _runner, ...w } of n.wasps) if (onMap(map, w)) visitors.push({ ...w, owner: null });
   }
   return {
