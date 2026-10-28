@@ -183,7 +183,7 @@ export const DOCS: Record<string, DocEntry> = {
   },
   random_spot: {
     section: 'What a bee knows',
-    details: "A bee only sees flowers 6 tiles away, and every season they bloom in new places. When nothing is in sight, a bee has to go looking: random_spot() picks a random open tile on your own map (never a hedge), so move_to(random_spot()) sends it somewhere new. The starting forager.bee does exactly that.",
+    details: `A bee only sees flowers ${SENSE_RANGE} tiles away, and every season they bloom in new places. When nothing is in sight, a bee has to go looking: random_spot() picks a random open tile on your own map (never a hedge), so move_to(random_spot()) sends it somewhere new. The starting forager.bee does exactly that.`,
     returns: 'A position as [x, y].',
     time: instant,
     demo: { forager: 'for i in range(3):\n    spot = random_spot()\n    print("exploring", spot)\n    move_to(spot)', view: [0, 0, 20, 12], length: 600 },
@@ -256,7 +256,7 @@ export const DOCS: Record<string, DocEntry> = {
   },
   smell: {
     section: 'Scent',
-    details: `Looks for a scent within ${SMELL_RANGE} tiles: twice as far as a bee can see (${SENSE_RANGE} tiles), so a mark can lead bees to flowers they can't see yet. If several tiles carry it, the strongest one wins, which is usually the freshest; between equally strong tiles, the closer one wins. Like nearest_flower(), it returns None when there is nothing to find, so "if smell("danger"):" works as a check.`,
+    details: `Looks for a scent within ${SMELL_RANGE} tiles: ${SMELL_RANGE / SENSE_RANGE} times as far as a bee can see (${SENSE_RANGE} tiles), so a mark can lead bees to flowers they can't see yet. If several tiles carry it, the strongest one wins, which is usually the freshest; between equally strong tiles, the closer one wins. Like nearest_flower(), it returns None when there is nothing to find, so "if smell("danger"):" works as a check.`,
     returns: 'A position like [4, 9], or None.',
     time: instant,
     demo: { forager: 'move_to([13, 6])\nmark("food")\ngo_home()\nprint("in sight?", nearest_flower() == [13, 6])\nprint("I smell food at", smell("food"))\nmove_to(smell("food"))\ncollect()', view: [0, 2, 15, 9] },
@@ -313,7 +313,7 @@ export const DOCS: Record<string, DocEntry> = {
   },
   enemies_near: {
     section: 'Raids and wasps',
-    details: `Where the enemies are: other colonies' bees and wasps, and wild wasps, within ${SENSE_RANGE} tiles, nearest first. Protected new colonies aren't counted, since they can't be fought. Wild wasps spot a bee within ${WILD_SIGHT} tiles and chase it, faster than a bee flies, until it's dead or safe in its hive. In single player, now and then a lone wild wasp visits for a season: it hunts bees out in the open (never in the hive), flies off after ${VISITOR_KILLS} kills, and gives up sooner if it catches nobody, so hiding, or three bee stings, beats it. Wild wasps keep a nest on some unclaimed maps in multiplayer, and sting anyone's bees on that map (never inside a hive, and never a protected colony's). This clip hangs a nest nearby: the bee peeks, sees them, and flees home.`,
+    details: `Where the enemies are: other colonies' bees and wasps, and wild wasps, within ${SENSE_RANGE} tiles, nearest first. Protected new colonies aren't counted, since they can't be fought. Wild wasps spot a bee within ${WILD_SIGHT} tiles and chase it, faster than a bee flies, until it's dead or safe in its hive. In single player, now and then a lone wild wasp visits for a season: it goes after any bee it sees out in the open (never in the hive), even on its way out, and heads off after ${VISITOR_KILLS} kills or once it catches nobody for a while, so hiding in the hive, or three bee stings, beats it. Wild wasps keep a nest on some unclaimed maps in multiplayer, and sting anyone's bees on that map (never inside a hive, and never a protected colony's). This clip hangs a nest nearby: the bee peeks, sees them, and flees home.`,
     returns: 'A list of positions, like [[9, 4], [10, 4]]; empty when no one is in sight.',
     time: instant,
     demo: { forager: 'print("near the hive:", enemies_near())\nmove_to([5, 4])\nprint("closer:", enemies_near())\ngo_home()', view: [0, 0, 13, 9], nest: [11, 3], nestWasps: 2, honey: 10, length: 260 },

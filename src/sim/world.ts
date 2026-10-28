@@ -19,7 +19,7 @@ export function inFootprint(hive: Tile, x: number, y: number): boolean {
   return Math.abs(x - hive.x) <= 1 && y >= hive.y - 3 && y <= hive.y + 1;
 }
 export const OPS_PER_TICK = 50; // script operations each bee (and the queen) may run per tick
-export const SENSE_RANGE = 6; // tiles a bee can see flowers from
+export const SENSE_RANGE = 4; // tiles a bee can see flowers from
 export const SMELL_RANGE = 12; // tiles a bee can smell scent from; scent carries farther than sight
 
 // action lengths, in ticks
@@ -108,7 +108,6 @@ export const NEST_WASPS = 4; // wild wasps a nest keeps
 export const NEST_SPAWN_TICKS = 600; // ticks between new wild wasps, while it has fewer than NEST_WASPS
 export const VISITOR_CHANCE = 0.5; // single player: the chance a lone wild wasp arrives as a season with flowers starts
 export const VISITOR_KILLS = 4; // bees a visitor stings to death before it's had its fill and flies off
-export const VISITOR_CARRY = 300; // ticks a visitor flies around with its catch, not hunting, after each kill
 export const VISITOR_PATIENCE = 600; // ticks a visitor hunts without a kill before it gives up and flies off
 export const WILD_SIGHT = 4; // tiles a wild wasp spots a bee from; then it chases that bee
 export const WILD_CHASE_TICKS = 4; // ticks per tile while chasing: half again as fast as a bee
@@ -1538,8 +1537,8 @@ export class World {
       this.die(colony, unit, 'stung', by);
       const visit = from ? null : this.nests.find(n => n.visitor && n.wasps.includes(attacker));
       if (visit?.visitor) {
-        // a visitor carries its catch around the meadow for a while before it hunts again; after a few it flies off
-        visit.visitor.lastKill = this.tick + VISITOR_CARRY;
+        // a visitor hunts on at once; after a few kills it heads off
+        visit.visitor.lastKill = this.tick;
         if (++visit.visitor.kills >= VISITOR_KILLS) this.sendOff(visit);
       }
     } else if (nest) {
@@ -1598,14 +1597,18 @@ export class World {
 
   /**
    * A wild wasp's mind: finish what it's doing, then sting an enemy next to it, chase one it
-   * can see (not too far from the nest, and never into a hive), or wander near the nest.
-   * In winter it stays in the nest. It needs no food and never grows old.
+   * can see (on the nest's map, and never into a hive), or wander near the nest. A bee coming
+   * into sight cuts a rest short, and a visitor hunts even on its way out. In winter a nest's
+   * wasps stay home. It needs no food and never grows old.
    */
   private stepWild(nest: Nest, w: Bee): void {
+    const hunting = this.season !== 'winter' || !!nest.visitor;
     const a = w.action;
     if (a) {
       if (a.kind === 'move') {
         if (this.moveTick(w, a) === 'going') return;
+      } else if (a.kind === 'wait' && hunting && this.wildPrey(nest, w)) {
+        // a bee came into sight: it stops resting and goes after it
       } else {
         if (--a.left > 0) return;
         if (a.kind === 'sting') {
@@ -1620,43 +1623,8 @@ export class World {
       }
       w.action = null;
     }
-    const home = { x: nest.x, y: nest.y };
-    if (nest.visitor?.leaving) {
-      // its season is over: off the meadow by the nearest edge
-      if (w.x === home.x && w.y === home.y) this.removeVisitor(nest, 'The wild wasp flew off.');
-      else this.stepToward(w, home);
-      return;
-    }
-    if (this.season === 'winter') {
-      if (w.x !== home.x || w.y !== home.y) this.stepToward(w, home);
-      else w.action = { kind: 'wait', left: 60 };
-      return;
-    }
-    // a wild wasp guards its nest's own map: it hunts nobody beyond it, and never a protected colony's bees
-    const nestMap = this.mapAt(nest);
-    const leashed = (t: Tile) => { const m = this.mapAt(t); return m.x === nestMap.x && m.y === nestMap.y; };
     const chase = (nest.chase ??= {});
-    const huntable = (b: Bee, c: Colony) => !c.shielded && leashed(b) && !this.isHive(b);
-    const carrying = !!nest.visitor && this.tick < nest.visitor.lastKill; // still flying around with its last catch
-    // the bee it's already chasing, as long as it's alive, out of its hive and on the nest's map
-    let prey: Bee | null = null;
-    if (!carrying && chase[w.id] !== undefined) {
-      for (const c of this.colonies) {
-        const b = c.bees.find(b => b.id === chase[w.id]);
-        if (b && huntable(b, c)) prey = b;
-      }
-    }
-    // otherwise the nearest bee it can spot
-    let best = Infinity;
-    for (const c of prey || carrying ? [] : this.colonies) {
-      for (const b of c.bees) {
-        const d = Math.hypot(b.x - w.x, b.y - w.y);
-        if (d <= WILD_SIGHT && d < best && huntable(b, c)) {
-          prey = b;
-          best = d;
-        }
-      }
-    }
+    const prey = hunting ? this.wildPrey(nest, w) : null;
     if (prey) {
       chase[w.id] = prey.id;
       if (Math.abs(prey.x - w.x) + Math.abs(prey.y - w.y) === 1) {
@@ -1666,7 +1634,20 @@ export class World {
       return;
     }
     delete chase[w.id];
+    const home = { x: nest.x, y: nest.y };
+    if (nest.visitor?.leaving) {
+      // its time is up: off the meadow by the nearest edge
+      if (w.x === home.x && w.y === home.y) this.removeVisitor(nest, 'The wild wasp flew off.');
+      else this.stepToward(w, home);
+      return;
+    }
+    if (this.season === 'winter') {
+      if (w.x !== home.x || w.y !== home.y) this.stepToward(w, home);
+      else w.action = { kind: 'wait', left: 60 };
+      return;
+    }
     // nobody to sting: roam to a spot near the nest, then rest a while
+    const nestMap = this.mapAt(nest);
     let spot = nest.roam[w.id];
     if (!spot || (spot.x === w.x && spot.y === w.y)) {
       if (spot) {
@@ -1689,11 +1670,45 @@ export class World {
   }
 
   /**
-   * Single player, as a season starts: a visitor still here flies off, and in a season with flowers
+   * The bee a wild wasp goes after: the one it's already chasing, as long as it's alive, out of its
+   * hive and on the nest's map, or else the nearest one it can spot. A wild wasp guards its nest's
+   * own map: it hunts nobody beyond it, and never a protected colony's bees.
+   */
+  private wildPrey(nest: Nest, w: Bee): Bee | null {
+    const nestMap = this.mapAt(nest);
+    const huntable = (b: Bee, c: Colony) => {
+      const m = this.mapAt(b);
+      return !c.shielded && m.x === nestMap.x && m.y === nestMap.y && !this.isHive(b);
+    };
+    const chased = nest.chase?.[w.id];
+    for (const c of chased === undefined ? [] : this.colonies) {
+      const b = c.bees.find(b => b.id === chased);
+      if (b && huntable(b, c)) return b;
+    }
+    let prey: Bee | null = null;
+    let best = Infinity;
+    for (const c of this.colonies) {
+      for (const b of c.bees) {
+        const d = Math.hypot(b.x - w.x, b.y - w.y);
+        if (d <= WILD_SIGHT && d < best && huntable(b, c)) {
+          prey = b;
+          best = d;
+        }
+      }
+    }
+    return prey;
+  }
+
+  /**
+   * Single player, as a season starts: a visitor still here heads off (one that was already
+   * heading off, but kept hunting, is simply gone), and in a season with flowers
    * (never the first spring, which isn't a season change) a new one may arrive at the meadow's edge.
    */
   private visitorsAtSeason(season: Season): void {
-    for (const n of this.nests) if (n.visitor) this.sendOff(n);
+    for (const n of [...this.nests]) {
+      if (n.visitor?.leaving) this.removeVisitor(n, 'The wild wasp flew off.');
+      else if (n.visitor) this.sendOff(n);
+    }
     if (season === 'winter' || this.nests.some(n => n.visitor) || this.rng() >= VISITOR_CHANCE) return;
     const colony = this.colonies[0];
     if (!colony) return;
@@ -1900,14 +1915,27 @@ export function bloom(seed: number, year: number, season: Exclude<Season, 'winte
   const flowers: Flower[] = [];
   for (let p = 0; p < b.patches; p++) {
     // spring's first patch grows within sight of home, so a new colony's first bee always finds food
-    const far = season === 'spring' && p === 0 ? Math.min(b.far, SENSE_RANGE - 1) : b.far;
+    const first = season === 'spring' && p === 0;
+    const far = first ? Math.min(b.far, SENSE_RANGE - 1) : b.far;
+    const near = first ? Math.min(b.near, far - 1) : b.near;
     let center: Tile | null = null;
+    if (first) {
+      // picked from every tile that fits, since random tries can miss so small a ring
+      const fits: Tile[] = [];
+      for (let y = 0; y < ROWS; y++) {
+        for (let x = 0; x < COLS; x++) {
+          const d = Math.hypot(x - hive.x, y - hive.y);
+          if (d >= near && d <= far && free(x, y)) fits.push({ x, y });
+        }
+      }
+      if (fits.length) center = fits[Math.floor(rnd() * fits.length)];
+    }
     for (let tries = 0; tries < 200 && !center; tries++) {
       const x = Math.floor(rnd() * COLS);
       const y = Math.floor(rnd() * ROWS);
       const d = Math.hypot(x - hive.x, y - hive.y);
       // patches keep at least 3 tiles apart, so they read as separate patches
-      if (d >= b.near && d <= far && free(x, y) && centers.every(c => Math.hypot(c.x - x, c.y - y) > 3)) center = { x, y };
+      if (d >= near && d <= far && free(x, y) && centers.every(c => Math.hypot(c.x - x, c.y - y) > 3)) center = { x, y };
     }
     if (!center) continue;
     centers.push(center);

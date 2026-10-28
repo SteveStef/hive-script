@@ -4,7 +4,7 @@ import { GUARD_WASP, SURVIVOR_FORAGER, SURVIVOR_QUEEN } from './fixtures';
 import { parse } from '../src/lang/parser';
 import {
   BEE_COST, BUILD_COST, HATCH_TICKS, LAY_TICKS, LIFESPAN_MAX, MARK_TICKS, MAX_ENERGY, MOVE_TICKS, SCENT_LIFE, SCENT_MAX,
-  BLOOMS, bloom, bloomMap, COLS, hedgeLayout, HIVE_SPOT, inFootprint, NEW_COLONY, ROWS, seasonAt, START_HONEY, VISITOR_PATIENCE, SEASON_TICKS, SHARED_LINE_BASE, START_BEES, START_COMB, tileKey, World,
+  BLOOMS, bloom, bloomMap, COLS, hedgeLayout, HIVE_SPOT, inFootprint, NEW_COLONY, ROWS, seasonAt, START_HONEY, VISITOR_PATIENCE, SEASON_TICKS, SENSE_RANGE, SHARED_LINE_BASE, START_BEES, START_COMB, tileKey, World,
   BEE_HEALTH, HATCH_TICKS as HATCH, NEST_BUILD_TICKS, NEST_COST, NEST_HEALTH, NEST_WASPS, STING_DAMAGE, STING_TICKS, WASP_CAPACITY, WASP_COST, WASP_HEALTH,
 } from '../src/sim/world';
 import { toJson } from '../src/sim/view';
@@ -212,11 +212,11 @@ describe('one bee per tile', () => {
   });
 
   it('nearest_flower() skips a flower another bee is on', () => {
-    const src = 'if get_pos() == [4, 9]:\n    wait(500)\nelse:\n    print(nearest_flower())';
-    const world = new World({ forager: parse(src), queen: parse(IDLE_QUEEN) }, 1, { bees: 2, flowers: [[4, 9], [5, 9]] });
-    Object.assign(world.colony.bees[1], { x: 4, y: 9 });
+    const src = 'if get_pos() == [4, 8]:\n    wait(500)\nelse:\n    print(nearest_flower())';
+    const world = new World({ forager: parse(src), queen: parse(IDLE_QUEEN) }, 1, { bees: 2, flowers: [[4, 8], [5, 8]] });
+    Object.assign(world.colony.bees[1], { x: 4, y: 8 });
     simulate(world, 3);
-    expect(printed(world)[0]).toBe('[5, 9]');
+    expect(printed(world)[0]).toBe('[5, 8]');
   });
 });
 
@@ -376,6 +376,13 @@ describe('seasons', () => {
           expect(Math.abs(f.x - hive.x) <= 1 && f.y >= hive.y - 3 && f.y <= hive.y + 1).toBe(false);
         }
       }
+    }
+  });
+
+  it('every spring, some flowers grow within sight of the hive, so a new colony always finds food', () => {
+    for (let seed = 1; seed <= 500; seed++) {
+      const spring = bloom(seed, 1 + (seed % 3), 'spring', HIVE_SPOT);
+      expect(spring.some(f => Math.hypot(f.x - HIVE_SPOT.x, f.y - HIVE_SPOT.y) <= SENSE_RANGE)).toBe(true);
     }
   });
 
@@ -1065,13 +1072,13 @@ describe('raiders and other hives, as the screen sees them', () => {
 });
 
 describe('flowers_near() and nectar_at()', () => {
-  // the hive is at [2, 6]; a bee sees 6 tiles
+  // the hive is at [2, 6]; a bee sees 4 tiles
   const meadow = (forager: string, bees = 1) =>
-    new World({ forager: parse(forager), queen: parse(IDLE_QUEEN), shared: SHARED }, 1, { bees, flowers: [[3, 6], [1, 6], [2, 8], [8, 6], [9, 6]] });
+    new World({ forager: parse(forager), queen: parse(IDLE_QUEEN), shared: SHARED }, 1, { bees, flowers: [[3, 6], [1, 6], [2, 8], [6, 6], [7, 6]] });
 
-  it('lists every flower in sight with nectar, nearest first, and none beyond 6 tiles', () => {
+  it('lists every flower in sight with nectar, nearest first, and none beyond 4 tiles', () => {
     const world = simulate(meadow('print(flowers_near())\nwhile True:\n    wait(100)'), 3);
-    expect(printed(world)).toEqual(['[[1, 6], [3, 6], [2, 8], [8, 6]]']); // a tie goes to the left one; [9, 6] is 7 away
+    expect(printed(world)).toEqual(['[[1, 6], [3, 6], [2, 8], [6, 6]]']); // a tie goes to the left one; [7, 6] is 5 away
   });
 
   it('skips empty flowers but keeps ones another bee is on', () => {
@@ -1079,20 +1086,20 @@ describe('flowers_near() and nectar_at()', () => {
     world.flowers.find(f => f.x === 1 && f.y === 6)!.nectar = 0;
     [world.colony.bees[1].x, world.colony.bees[1].y] = [3, 6]; // another bee sits on [3, 6]
     simulate(world, 3);
-    expect(printed(world)).toEqual(['[[3, 6], [2, 8], [8, 6]] [2, 8]']); // nearest_flower() still skips the taken one
+    expect(printed(world)).toEqual(['[[3, 6], [2, 8], [6, 6]] [2, 8]']); // nearest_flower() still skips the taken one
   });
 
   it('flowers_near(True) includes empty flowers; anything but True or False is a mistake', () => {
     const world = meadow('print(flowers_near(True))\nprint(flowers_near(False))\nwhile True:\n    wait(100)');
     world.flowers.find(f => f.x === 1 && f.y === 6)!.nectar = 0;
     simulate(world, 3);
-    expect(printed(world)).toEqual(['[[1, 6], [3, 6], [2, 8], [8, 6]]', '[[3, 6], [2, 8], [8, 6]]']);
+    expect(printed(world)).toEqual(['[[1, 6], [3, 6], [2, 8], [6, 6]]', '[[3, 6], [2, 8], [6, 6]]']);
     const bad = simulate(meadow('flowers_near(1)'), 3);
     expect(bad.error?.message).toMatch(/True or False/);
   });
 
   it('nectar_at() reads a flower in sight: its nectar, 0 when emptied, None for bare ground or out of sight', () => {
-    const world = meadow('print(nectar_at([3, 6]), nectar_at([4, 4]), nectar_at([9, 6]))\nmove_to([3, 6])\nwhile collect():\n    pass\nprint(nectar_at([3, 6]))\nwhile True:\n    wait(100)');
+    const world = meadow('print(nectar_at([3, 6]), nectar_at([4, 4]), nectar_at([7, 6]))\nmove_to([3, 6])\nwhile collect():\n    pass\nprint(nectar_at([3, 6]))\nwhile True:\n    wait(100)');
     world.flowers.find(f => f.x === 3 && f.y === 6)!.nectar = 2; // less than a bee carries, so it runs dry
     simulate(world, 200);
     const [first, after] = printed(world);
@@ -1184,5 +1191,41 @@ describe('a lone wild wasp visiting single player', () => {
     expect(visitors(world)).toEqual([]);
     expect(world.colony.bees).toHaveLength(0); // each bee's sting was its last
     expect(world.colony.kills).toBe(1);
+  });
+
+  // a visitor at [9, 5], bees out in the open that a single sting kills, and one more at home
+  const hunt = (spots: number[][], seed = 5) => {
+    const world = new World(programs(), seed, { visitors: true, bees: spots.length + 1 });
+    bringOne(world);
+    const [visit] = visitors(world);
+    const wasp = visit.wasps[0];
+    [wasp.x, wasp.y] = [9, 5];
+    spots.forEach(([x, y], i) => Object.assign(world.colony.bees[i], { x, y, health: 1 }));
+    return { world, visit, wasp };
+  };
+
+  it('cuts a rest short when a bee comes into sight', () => {
+    const { world, wasp } = hunt([[9, 8]]);
+    wasp.action = { kind: 'wait', left: 500 };
+    simulate(world, 30);
+    expect(world.colony.fallen.map(b => b.death?.cause)).toEqual(['stung']);
+  });
+
+  it('goes straight after the next bee once it has made a kill', () => {
+    const { world } = hunt([[9, 6], [9, 8]]);
+    simulate(world, 40);
+    expect(world.colony.fallen.map(b => b.death?.cause)).toEqual(['stung', 'stung']);
+  });
+
+  it('hunts on its way out, and is gone by the next season change anyway', () => {
+    const { world, visit } = hunt([[9, 8]]);
+    const seasonHook = world as unknown as { visitorsAtSeason(s: string): void };
+    seasonHook.visitorsAtSeason('autumn'); // its season ends: it heads off
+    expect(visit.visitor?.leaving).toBe(true);
+    simulate(world, 30);
+    expect(world.colony.fallen.map(b => b.death?.cause)).toEqual(['stung']);
+    seasonHook.visitorsAtSeason('winter'); // still around a season later: simply gone
+    expect(visitors(world)).toEqual([]);
+    expect(world.colony.log.some(l => l.text === 'The wild wasp flew off.')).toBe(true);
   });
 });

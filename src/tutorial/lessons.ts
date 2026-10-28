@@ -1,7 +1,7 @@
 import { DEFAULT_SHARED } from '../defaultScript';
 import { parse } from '../lang/parser';
 import type { ScriptSet } from '../sim/scripts';
-import { SCENT_LIFE, SEASON_TICKS, World, type Programs, type ScriptFile, type WorldOptions } from '../sim/world';
+import { SCENT_LIFE, SEASON_TICKS, SENSE_RANGE, World, type Programs, type ScriptFile, type WorldOptions } from '../sim/world';
 
 /** One goal of a lesson, checked against the running world after every tick. */
 export interface Goal {
@@ -130,7 +130,7 @@ export const LESSONS: Lesson[] = [
     intro: `
       <p>A script that ends leaves its bee idle. Real foragers run forever: wrap the work in ${code('while True:')}.</p>
       <p>Flowers run dry as you collect, and slowly refill. ${fn('nearest_flower')} finds the closest flower that still has nectar
-      (within 6 tiles), or ${code('None')}. To see every flower in sight instead, ${fn('flowers_near')} lists them nearest first, and ${fn('nectar_at', 'position')} says how full one is.
+      (within ${SENSE_RANGE} tiles), or ${code('None')}. To see every flower in sight instead, ${fn('flowers_near')} lists them nearest first, and ${fn('nectar_at', 'position')} says how full one is.
       ${fn('nectar')} and ${fn('capacity')} say how much the bee carries and can carry.</p>
       <p><b>Do this:</b> make 12 honey with one bee that keeps foraging on its own.</p>`,
     tabs: ['forager'],
@@ -236,7 +236,7 @@ export const LESSONS: Lesson[] = [
     topic: 'Advanced tools',
     title: 'Scent',
     intro: `
-      <p>A bee sees flowers only 6 tiles away, and scripts can't share variables: every bee has its own copy. Bees share what they know with scent.
+      <p>A bee sees flowers only ${SENSE_RANGE} tiles away, and scripts can't share variables: every bee has its own copy. Bees share what they know with scent.
       ${fn('mark', '"food"')} scents the bee's tile, and ${fn('smell', '"food"')} finds the strongest mark within 12 tiles. Marks fade over ${SCENT_LIFE} ticks, most of a season, and leaving one takes just a tick.</p>
       <p>The flowers here are out of sight of the hive. <b>Do this:</b> have your bees mark the flowers they find, and follow the scent.</p>`,
     tabs: ['forager'],

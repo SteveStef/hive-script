@@ -1,5 +1,5 @@
 // The starting scripts are short and work, but on purpose they don't keep a colony alive for
-// long (it dies in its first autumn): improving them is the game.
+// long (it dies within its first year): improving them is the game.
 
 export const DEFAULT_FORAGER = `# forager.bee: every forager runs this, over and over.
 while True:

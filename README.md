@@ -40,11 +40,11 @@ npm run bench          # time a full 25-colony world, to check ticks stay well u
 
 Sign up, then pick **Single player**, **Multiplayer** or **Tutorial** from the menu. A new
 account starts with short scripts (`src/defaultScript.ts`) that gather honey and hatch bees but,
-on purpose, let the colony die out in its first autumn: keeping it alive is the player's job. In
+on purpose, let the colony die out within its first year: keeping it alive is the player's job. In
 single player, from summer of year 1, about half the seasons with flowers bring a lone wild wasp
-(`VISITOR_CHANCE`): it hunts bees in the open, never the hive, roams with each catch before hunting
-again, and flies off after 4 kills, when it
-catches nobody for a while, or at the season's end. A new
+(`VISITOR_CHANCE`): it hunts bees in the open, never the hive, and goes after any bee it sees, even resting or
+on its way out. It heads off after 4 kills, when it catches nobody for a while, or at the
+season's end, and is gone by the next season at the latest. A new
 game's colony (single player, or a newly founded multiplayer one) starts with no bees and 10 honey
 (`NEW_COLONY`): the queen lays the first bee, of any role, and that first egg hatches at once. The
 tutorial is 14 hands-on lessons, from your first bee to wasps and raids: each gives a goal the
@@ -179,7 +179,7 @@ Key ideas:
 - **Each bee gets 50 operations per tick**, so an infinite loop can't freeze the game.
 - **One bee per tile** (the hive holds any number). `move()` fails into an occupied tile;
   `move_to()` steers around bees and gives up if blocked too long; `nearest_flower()` skips
-  flowers another bee is on. `flowers_near()` lists every flower with nectar in sight (6 tiles),
+  flowers another bee is on. `flowers_near()` lists every flower with nectar in sight (4 tiles),
   nearest first, taken or not, and `nectar_at(position)` reads one, so a script can choose.
 - **The economy limits the colony, not a fixed number.** Each egg costs 10 honey and every
   bee or egg needs a cell of comb; workers `build()` more comb from 15 honey. Flowers can
