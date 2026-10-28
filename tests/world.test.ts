@@ -1082,6 +1082,15 @@ describe('flowers_near() and nectar_at()', () => {
     expect(printed(world)).toEqual(['[[3, 6], [2, 8], [8, 6]] [2, 8]']); // nearest_flower() still skips the taken one
   });
 
+  it('flowers_near(True) includes empty flowers; anything but True or False is a mistake', () => {
+    const world = meadow('print(flowers_near(True))\nprint(flowers_near(False))\nwhile True:\n    wait(100)');
+    world.flowers.find(f => f.x === 1 && f.y === 6)!.nectar = 0;
+    simulate(world, 3);
+    expect(printed(world)).toEqual(['[[1, 6], [3, 6], [2, 8], [8, 6]]', '[[3, 6], [2, 8], [8, 6]]']);
+    const bad = simulate(meadow('flowers_near(1)'), 3);
+    expect(bad.error?.message).toMatch(/True or False/);
+  });
+
   it('nectar_at() reads a flower in sight: its nectar, 0 when emptied, None for bare ground or out of sight', () => {
     const world = simulate(meadow('print(nectar_at([3, 6]), nectar_at([4, 4]), nectar_at([9, 6]))\nmove_to([3, 6])\nwhile collect():\n    pass\nprint(nectar_at([3, 6]))\nwhile True:\n    wait(100)'), 200);
     const [first, after] = printed(world);

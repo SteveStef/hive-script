@@ -207,8 +207,9 @@ export function beeGlobals(colony: Colony, bee: Bee): Record<string, Value> {
       return f ? [f.x, f.y] : null;
     }),
     flowers_near: builtin('flowers_near', (args, line) => {
-      expectArgs('flowers_near', args, 0, line);
-      return world.flowersNear(bee).map(f => [f.x, f.y]);
+      if (args.length > 1) throw new ScriptError(`flowers_near() takes nothing, or True to include empty flowers, but got ${args.length} values.`, line);
+      if (args.length && typeof args[0] !== 'boolean') throw new ScriptError(`flowers_near() takes True or False (include empty flowers?), not ${format(args[0], true)}.`, line);
+      return world.flowersNear(bee, args[0] === true).map(f => [f.x, f.y]);
     }),
     nectar_at: builtin('nectar_at', (args, line) => {
       expectArgs('nectar_at', args, 1, line);

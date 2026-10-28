@@ -874,12 +874,15 @@ export class World {
     return null;
   }
 
-  /** Every flower with nectar within the bee's sight, nearest first (ties: top row first, then left), taken or not. */
-  flowersNear(bee: Bee): Flower[] {
+  /**
+   * Every flower within the bee's sight, nearest first (ties: top row first, then left), taken or
+   * not. Only ones with nectar, unless empty ones are asked for too (they refill, so a map wants them).
+   */
+  flowersNear(bee: Bee, withEmpty = false): Flower[] {
     const near: [Flower, number][] = [];
     for (const f of this.flowers) {
       const d = Math.hypot(f.x - bee.x, f.y - bee.y);
-      if (f.nectar >= 1 && d <= SENSE_RANGE) near.push([f, d]);
+      if ((withEmpty || f.nectar >= 1) && d <= SENSE_RANGE) near.push([f, d]);
     }
     return near.sort((a, b) => a[1] - b[1] || tileKey(a[0].x, a[0].y) - tileKey(b[0].x, b[0].y)).map(([f]) => f);
   }

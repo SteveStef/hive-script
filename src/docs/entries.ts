@@ -162,7 +162,7 @@ export const DOCS: Record<string, DocEntry> = {
   flowers_near: {
     section: 'What a bee knows',
     covers: ['nectar_at'],
-    details: `Every flower with nectar within ${SENSE_RANGE} tiles (the dotted circle), nearest first, including flowers other bees are on, so a script can choose: the fullest, the one nobody else is heading for, or the patch to tell others about. nectar_at(position) says how much nectar a flower in sight has left (0 when it's empty), or None if there's no flower on that tile or it's too far to see. Both are instant.`,
+    details: `Every flower with nectar within ${SENSE_RANGE} tiles (the dotted circle), nearest first, including flowers other bees are on, so a script can choose: the fullest, the one nobody else is heading for, or the patch to tell others about. flowers_near(True) lists empty flowers as well, since they refill: handy for a scout mapping where flowers are. nectar_at(position) says how much nectar a flower in sight has left (0 when it's empty), or None if there's no flower on that tile or it's too far to see. Both are instant.`,
     returns: 'flowers_near(): a list of positions, like [[4, 9], [5, 9]], or [] when none are in sight. nectar_at(): a whole number, or None.',
     time: instant,
     demo: { forager: 'here = flowers_near()\nprint(len(here), "flowers in sight:", here)\nf = here[0]\nprint("nectar at", f, "is", nectar_at(f))\nmove_to(f)\ncollect()\nprint("after one collect:", nectar_at(f))\nprint("out of sight:", nectar_at([18, 9]))', view: MEADOW_VIEW, sight: true },
