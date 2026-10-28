@@ -42,7 +42,8 @@ Sign up, then pick **Single player**, **Multiplayer** or **Tutorial** from the m
 account starts with short scripts (`src/defaultScript.ts`) that gather honey and hatch bees but,
 on purpose, let the colony die out in its first autumn: keeping it alive is the player's job. In
 single player, from summer of year 1, about half the seasons with flowers bring a lone wild wasp
-(`VISITOR_CHANCE`): it hunts bees in the open, never the hive, and flies off after 5 kills, when it
+(`VISITOR_CHANCE`): it hunts bees in the open, never the hive, roams with each catch before hunting
+again, and flies off after 4 kills, when it
 catches nobody for a while, or at the season's end. A new
 game's colony (single player, or a newly founded multiplayer one) starts with no bees and 10 honey
 (`NEW_COLONY`): the queen lays the first bee, of any role, and that first egg hatches at once. The

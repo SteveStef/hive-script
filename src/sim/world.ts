@@ -107,8 +107,8 @@ export const NEST_HEALTH = 60;
 export const NEST_WASPS = 4; // wild wasps a nest keeps
 export const NEST_SPAWN_TICKS = 600; // ticks between new wild wasps, while it has fewer than NEST_WASPS
 export const VISITOR_CHANCE = 0.5; // single player: the chance a lone wild wasp arrives as a season with flowers starts
-export const VISITOR_KILLS = 5; // bees a visitor stings to death before it's had its fill and flies off
-export const VISITOR_REST = 300; // ticks a visitor rests (eats) after each kill
+export const VISITOR_KILLS = 4; // bees a visitor stings to death before it's had its fill and flies off
+export const VISITOR_CARRY = 300; // ticks a visitor flies around with its catch, not hunting, after each kill
 export const VISITOR_PATIENCE = 600; // ticks a visitor hunts without a kill before it gives up and flies off
 export const WILD_WANDER = 6; // tiles from the nest a wild wasp roams when it sees no one (never off the nest's map)
 
@@ -1533,9 +1533,8 @@ export class World {
       this.die(colony, unit, 'stung', by);
       const visit = from ? null : this.nests.find(n => n.visitor && n.wasps.includes(attacker));
       if (visit?.visitor) {
-        // a visitor eats what it caught, and after a few has had its fill
-        attacker.action = { kind: 'wait', left: VISITOR_REST };
-        visit.visitor.lastKill = this.tick + VISITOR_REST;
+        // a visitor carries its catch around the meadow for a while before it hunts again; after a few it flies off
+        visit.visitor.lastKill = this.tick + VISITOR_CARRY;
         if (++visit.visitor.kills >= VISITOR_KILLS) this.sendOff(visit);
       }
     } else if (nest) {
@@ -1606,8 +1605,7 @@ export class World {
         if (--a.left > 0) return;
         if (a.kind === 'sting') this.strike(w, null, a.target);
       }
-      if (w.action === a) w.action = null;
-      if (w.action) return; // a visitor resting after a kill
+      w.action = null;
     }
     const home = { x: nest.x, y: nest.y };
     if (nest.visitor?.leaving) {
@@ -1626,7 +1624,8 @@ export class World {
     const leashed = (t: Tile) => { const m = this.mapAt(t); return m.x === nestMap.x && m.y === nestMap.y; };
     let prey: Bee | null = null;
     let best = Infinity;
-    for (const c of this.colonies) {
+    const carrying = !!nest.visitor && this.tick < nest.visitor.lastKill; // still flying around with its last catch
+    for (const c of carrying ? [] : this.colonies) {
       if (c.shielded) continue;
       for (const b of c.bees) {
         const d = Math.hypot(b.x - w.x, b.y - w.y);
