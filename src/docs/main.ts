@@ -56,6 +56,7 @@ class Clip {
 
   constructor(private readonly demo: Demo, canvas: HTMLCanvasElement, private readonly code: HTMLElement, private readonly output: HTMLElement) {
     this.renderer = new Renderer(this.full);
+    this.renderer.setPace(DEMO_TICKS_PER_SECOND);
     canvas.width = demo.view[2] * TILE;
     canvas.height = demo.view[3] * TILE;
     this.g = canvas.getContext('2d')!;

@@ -63,17 +63,24 @@ function drawHedge(g: CanvasRenderingContext2D, x: number, y: number, w: number,
   g.fillRect(x, y + h - 1, w, 1);
 }
 
-// the box under the roof is cream; boxes stacked on it as honey grows cycle mint, honey and pink
+// the bottom box is cream; boxes stacked on it as honey grows are mint, honey, pink and lavender
 const BOXES: [string, string, string][] = [
   ['#ECE0BC', '#CDBF94', '#FFF6DA'],
   ['#9CC9C2', '#77A59E', '#C4E6E0'],
   ['#F2C46A', '#CF9C3C', '#FFE0A0'],
   ['#E8A0A4', '#C47A7E', '#F8C6C8'],
+  ['#BCA8E4', '#9682C2', '#DCD0F6'],
 ];
 const BOX_H = 9;
 
-/** How many boxes a hive stands with: one, and one more per 50 honey, up to four. */
-export const boxesFor = (honey: number): number => 1 + Math.min(3, Math.floor(honey / 50));
+/**
+ * The honey at which each box past the first goes on: quickly at first, then only for a well-stocked
+ * hive. Five boxes is the most that fits in the hive's footprint, the tiles where nothing grows.
+ */
+export const BOX_HONEY = [50, 100, 200, 300];
+
+/** How many boxes a hive stands with: one, plus one for each BOX_HONEY step it has reached. */
+export const boxesFor = (honey: number): number => 1 + BOX_HONEY.filter(h => honey >= h).length;
 
 /**
  * A painted box hive: a tin roof, stacked boxes with hand holds, an entrance slit over a landing

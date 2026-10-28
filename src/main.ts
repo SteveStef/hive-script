@@ -1207,6 +1207,7 @@ function frame(now: number): void {
   const w = view();
   if (w.tick > 0) music.play(w.season);
   const ghost = placing && hover ? { tile: hover, ok: !placeProblem(hover) } : null;
+  renderer.setPace(mode === 'multi' ? 1000 / tickMs : TICKS_PER_SECOND * speed);
   renderer.draw(w, frac, typeof selected === 'number' ? selected : null, hover, ghost);
   w.events = [];
   updateHud(w);

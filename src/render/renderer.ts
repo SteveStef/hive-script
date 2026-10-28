@@ -3,7 +3,7 @@ import waspSheetUrl from '../assets/wasp.png';
 import type { ColonyView } from '../sim/view';
 import { COLS, keyTile, MOVE_TICKS, ROWS, SCENT_MAX, SENSE_RANGE, tileKey, type Bee, type Dir, type Season, type Tile } from '../sim/world';
 import { edgedSheet, INK, mirrored, recolor, remap } from './pixels';
-import { boxesFor, BUDS, FLOWER_SPOTS, makeBoxHive, makeGround, makeNest, TILE, TINY } from './scenery';
+import { BOX_HONEY, boxesFor, BUDS, FLOWER_SPOTS, makeBoxHive, makeGround, makeNest, TILE, TINY } from './scenery';
 
 // Elthen's "Bumble Bee Sprites" sheet: 4 rows (east, west, north, south) of 4 frames, 32x32 each.
 // The bee sits near (16, 14) in each frame and bobs on its own.
@@ -13,6 +13,10 @@ const FRAME = 32;
 // Flying west uses a mirrored copy; flying north or south keeps the side it last faced.
 const WASP_ROW = { hover: 0, fly: 1, sting: 2, hit: 3, death: 4 };
 const HIT_FRAMES = 18; // how long a stung unit shows its hit frames
+// Effects are timed in 60ths of a second of real time ("frames"), so they look the same on any screen.
+const FRAME_MS = 1000 / 60;
+// Wings flap with the game's pace: a frame of the flap every 1.5 game ticks, kept between these rates.
+const FLAP_FPS = [6, 12];
 // scent colors; each scent name always gets the same one
 const SCENT_COLORS = ['180, 140, 255', '255, 107, 139', '95, 211, 224', '255, 216, 74', '255, 154, 61', '155, 227, 107'];
 
@@ -119,7 +123,7 @@ export class Renderer {
   private readonly g: CanvasRenderingContext2D;
   private ground: HTMLCanvasElement | null = null;
   private groundKey = ''; // the map, hives and flowers the ground was drawn for
-  private readonly hives = [1, 2, 3, 4].map(makeBoxHive); // by box count: one more box per 50 honey
+  private readonly hives = Array.from({ length: BOX_HONEY.length + 1 }, (_, i) => makeBoxHive(i + 1)); // by box count
   private readonly boxes = new Map<number, number>(); // each hive (tileKey) -> the boxes it was last drawn with
   private readonly nest = makeNest();
   private readonly colonyNest = makeNest(true);
@@ -135,7 +139,10 @@ export class Renderer {
   private floats: Float[] = [];
   private ghosts: Ghost[] = []; // a ghost's role "wasp" draws the wasp's death frames
   private readonly weather = Array.from({ length: 48 }, () => ({ x: Math.random() * COLS * TILE, y: Math.random() * ROWS * TILE, phase: Math.random() * 6 }));
-  private frame = 0;
+  private frame = 0; // real time, in 60ths of a second
+  private wings = 0; // how far the wing flap has run, in 60ths of a second at 10 flap frames a second
+  private lastDraw = 0;
+  private flapRate = 1; // the wings' speed, against 10 flap frames a second
   private roleNames: string[] = ['forager'];
   private readonly roleSheets = new Map<string, HTMLCanvasElement>(); // the sprite sheet recolored, by role color
 
@@ -145,6 +152,11 @@ export class Renderer {
     this.g = canvas.getContext('2d')!;
     this.sheet.src = beeSheetUrl;
     this.waspSheet.src = waspSheetUrl;
+  }
+
+  /** The game's pace, in ticks a second: wings flap faster in a faster game, within FLAP_FPS. */
+  setPace(ticksPerSecond: number): void {
+    this.flapRate = Math.min(FLAP_FPS[1], Math.max(FLAP_FPS[0], ticksPerSecond / 1.5)) / 10;
   }
 
   /** Draws the eye to a tile: rings of light spreading from it, one after another. */
@@ -181,9 +193,15 @@ export class Renderer {
     const g = this.g;
     const t = world.tick + frac;
     const o = world.origin;
-    this.frame++;
+    // how much real time passed since the last picture, in 60ths of a second (capped, so a tab
+    // that was hidden doesn't jump every effect to its end)
+    const now = performance.now();
+    const step = this.lastDraw ? Math.min(4, (now - this.lastDraw) / FRAME_MS) : 1;
+    this.lastDraw = now;
+    this.frame += step;
+    this.wings += step * this.flapRate;
     this.roleNames = world.roleNames;
-    if (this.frame % 600 === 0) for (const [id, until] of this.hits) if (until < this.frame) this.hits.delete(id);
+    for (const [id, until] of this.hits) if (until < this.frame) this.hits.delete(id);
     for (const e of world.events) {
       if (e.type === 'collect') this.burst(e.x * TILE + 8, e.y * TILE + 4);
       if (e.type === 'death') this.ghosts.push({ role: e.role, x: e.x * TILE + 8, y: e.y * TILE + 2, facing: e.facing, life: 90 });
@@ -303,9 +321,9 @@ export class Renderer {
     }
 
     // fallen bees float up and fade
-    this.ghosts = this.ghosts.filter(gh => --gh.life > 0);
+    this.ghosts = this.ghosts.filter(gh => (gh.life -= step) > 0);
     for (const gh of this.ghosts) {
-      gh.y -= 0.2;
+      gh.y -= 0.2 * step;
       g.globalAlpha = (gh.life / 90) * 0.7;
       if (gh.role === 'wasp') {
         const fr = Math.min(3, Math.floor((90 - gh.life) / 8));
@@ -314,15 +332,15 @@ export class Renderer {
       g.globalAlpha = 1;
     }
 
-    this.particles = this.particles.filter(p => --p.life > 0);
+    this.particles = this.particles.filter(p => (p.life -= step) > 0);
     for (const p of this.particles) {
-      p.x += p.vx;
-      p.y += p.vy;
-      p.vy += 0.03;
+      p.x += p.vx * step;
+      p.y += p.vy * step;
+      p.vy += 0.03 * step;
       g.fillStyle = p.color;
       g.fillRect(Math.round(p.x), Math.round(p.y), 1, 1);
     }
-    this.rings = this.rings.filter(r => --r.life > 0);
+    this.rings = this.rings.filter(r => (r.life -= step) > 0);
     for (const r of this.rings) {
       const radius = 3 + (r.max - r.life) * 0.9;
       g.fillStyle = `rgba(255, 240, 180, ${(r.life / r.max).toFixed(2)})`;
@@ -331,7 +349,7 @@ export class Renderer {
         g.fillRect(Math.round(r.x + Math.cos(a) * radius), Math.round(r.y + Math.sin(a) * radius * 0.7), 1, 1);
       }
     }
-    this.floats = this.floats.filter(f => --f.life > 0);
+    this.floats = this.floats.filter(f => (f.life -= step) > 0);
     for (const f of this.floats) {
       g.globalAlpha = Math.min(1, f.life / 15);
       this.drawText(f.text, Math.round(f.x), Math.round(f.y - (45 - f.life) * 0.35));
@@ -339,7 +357,7 @@ export class Renderer {
     g.globalAlpha = 1;
     g.restore();
 
-    this.drawSeason(world.season);
+    this.drawSeason(world.season, step);
 
     const sel = placed.find(p => p.mine && p.bee.id === selectedId);
     if (sel) {
@@ -561,10 +579,10 @@ export class Renderer {
       if (p.bee.facing === 'east' || p.bee.facing === 'west') this.waspFacing.set(p.bee.id, p.bee.facing);
       const hit = (this.hits.get(p.bee.id) ?? 0) > this.frame;
       const row = hit ? WASP_ROW.hit : a?.kind === 'sting' ? WASP_ROW.sting : a?.kind === 'move' && a.moving ? WASP_ROW.fly : WASP_ROW.hover;
-      const fr = Math.floor((this.frame + p.bee.id * 5) / 6) % 4;
+      const fr = Math.floor((this.wings + p.bee.id * 5) / 6) % 4;
       this.drawWaspFrame(this.waspFacing.get(p.bee.id) ?? 'east', row, fr, x, y, p.mine ? 'own' : p.wild ? 'wild' : 'rival');
     } else if (sheetReady) {
-      const fr = Math.floor((this.frame + p.bee.id * 5) / 6) % 4;
+      const fr = Math.floor((this.wings + p.bee.id * 5) / 6) % 4;
       const sheet = p.mine ? this.sheetFor(p.bee.role) : (this.unitSheets()?.rivalBee ?? this.sheet);
       g.drawImage(sheet, fr * FRAME, SHEET_ROW[p.bee.facing] * FRAME, FRAME, FRAME, x - 16, y - 14, FRAME, FRAME);
     } else {
@@ -601,7 +619,7 @@ export class Renderer {
     return sheet;
   }
 
-  private drawSeason(season: Season): void {
+  private drawSeason(season: Season, step: number): void {
     const g = this.g;
     const tint = SEASON_TINT[season];
     if (tint) {
@@ -611,9 +629,9 @@ export class Renderer {
     if (season !== 'autumn' && season !== 'winter') return;
     // falling leaves in autumn, snow in winter
     for (const w of this.weather) {
-      w.phase += 0.03;
-      w.y += season === 'winter' ? 0.35 : 0.25;
-      w.x += Math.sin(w.phase) * 0.3 - (season === 'autumn' ? 0.15 : 0);
+      w.phase += 0.03 * step;
+      w.y += (season === 'winter' ? 0.35 : 0.25) * step;
+      w.x += (Math.sin(w.phase) * 0.3 - (season === 'autumn' ? 0.15 : 0)) * step;
       if (w.y > this.height) w.y = -2;
       if (w.x < -2) w.x = this.width;
       if (w.x > this.width + 2) w.x = 0;
