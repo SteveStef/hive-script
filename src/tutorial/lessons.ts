@@ -119,7 +119,7 @@ export const LESSONS: Lesson[] = [
     solution: { forager: 'move_to([5, 8])\ncollect()\ncollect()\ncollect()\ngo_home()\ndeposit()\n' },
     world: meadow(NEAR),
     goals: [{ text: '3 honey in the hive', check: w => made(w) >= 3 }],
-    hints: ['Call collect() three times on the flower to fill up.', 'Then go_home() and deposit(). Watch the Honey count under the meadow (Colony tab); the hive grows a box at 50 honey, and more as it fills.'],
+    hints: ['Call collect() three times on the flower to fill up.', 'Then go_home() and deposit(). Watch the Honey count under the meadow (Colony tab); the hive grows a box at 100 honey, and more as it fills.'],
     recap: 'collect(), go_home(), deposit(): the loop at the heart of every colony.',
     budget: 120,
   },

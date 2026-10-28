@@ -74,10 +74,11 @@ const BOXES: [string, string, string][] = [
 const BOX_H = 9;
 
 /**
- * The honey at which each box past the first goes on: quickly at first, then only for a well-stocked
- * hive. Five boxes is the most that fits in the hive's footprint, the tiles where nothing grows.
+ * The honey at which each box past the first goes on: two or three for a healthy colony, the last
+ * ones only for a hive stocked over years. Five boxes is the most that fits in the hive's
+ * footprint, the tiles where nothing grows.
  */
-export const BOX_HONEY = [50, 100, 200, 300];
+export const BOX_HONEY = [100, 200, 500, 800];
 
 /** How many boxes a hive stands with: one, plus one for each BOX_HONEY step it has reached. */
 export const boxesFor = (honey: number): number => 1 + BOX_HONEY.filter(h => honey >= h).length;

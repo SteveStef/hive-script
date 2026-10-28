@@ -60,7 +60,7 @@ behind it and the row in front, one tile either side) on that map and clear of f
 a gate next to it is fine. Each map still grows its seeded meadow, minus anything under a hive,
 and the hive never moves once the colony starts (`World.hiveProblem`, `bloomMap`'s `hives`).
 
-**What the meadow shows:** the hive is a painted box hive that grows a box at 50, 100, 200 and 300
+**What the meadow shows:** the hive is a painted box hive that grows a box at 100, 200, 500 and 800
 honey (`BOX_HONEY`, up to five), and a brood comb in front of it has a cell per egg: egg, grub, then capped, with a ring and
 a rising "+1" when one hatches. Other players' bees and wasps have a red edge, wild wasps are grey
 like their paper nests, and a red banner over the meadow names any enemy on your hive, even while
