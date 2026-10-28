@@ -130,7 +130,8 @@ export const LESSONS: Lesson[] = [
     intro: `
       <p>A script that ends leaves its bee idle. Real foragers run forever: wrap the work in ${code('while True:')}.</p>
       <p>Flowers run dry as you collect, and slowly refill. ${fn('nearest_flower')} finds the closest flower that still has nectar
-      (within 6 tiles), or ${code('None')}. ${fn('nectar')} and ${fn('capacity')} say how much the bee carries and can carry.</p>
+      (within 6 tiles), or ${code('None')}. To see every flower in sight instead, ${fn('flowers_near')} lists them nearest first, and ${fn('nectar_at', 'position')} says how full one is.
+      ${fn('nectar')} and ${fn('capacity')} say how much the bee carries and can carry.</p>
       <p><b>Do this:</b> make 12 honey with one bee that keeps foraging on its own.</p>`,
     tabs: ['forager'],
     starter: { forager: 'while True:\n    f = nearest_flower()\n    move_to(f)\n    collect()\n' },

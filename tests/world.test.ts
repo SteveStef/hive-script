@@ -1063,3 +1063,38 @@ describe('raiders and other hives, as the screen sees them', () => {
     expect(toJson(world, mine, { x: 1, y: 0 }).otherHives).toEqual([{ ...theirs.hive, owner: 'bob', shielded: false, honey: 120 }]);
   });
 });
+
+describe('flowers_near() and nectar_at()', () => {
+  // the hive is at [2, 6]; a bee sees 6 tiles
+  const meadow = (forager: string, bees = 1) =>
+    new World({ forager: parse(forager), queen: parse(IDLE_QUEEN), shared: SHARED }, 1, { bees, flowers: [[3, 6], [1, 6], [2, 8], [8, 6], [9, 6]] });
+
+  it('lists every flower in sight with nectar, nearest first, and none beyond 6 tiles', () => {
+    const world = simulate(meadow('print(flowers_near())\nwhile True:\n    wait(100)'), 3);
+    expect(printed(world)).toEqual(['[[1, 6], [3, 6], [2, 8], [8, 6]]']); // a tie goes to the left one; [9, 6] is 7 away
+  });
+
+  it('skips empty flowers but keeps ones another bee is on', () => {
+    const world = meadow('if get_pos() == [3, 6]:\n    wait(1000)\nelse:\n    print(flowers_near(), nearest_flower())\nwhile True:\n    wait(100)', 2);
+    world.flowers.find(f => f.x === 1 && f.y === 6)!.nectar = 0;
+    [world.colony.bees[1].x, world.colony.bees[1].y] = [3, 6]; // another bee sits on [3, 6]
+    simulate(world, 3);
+    expect(printed(world)).toEqual(['[[3, 6], [2, 8], [8, 6]] [2, 8]']); // nearest_flower() still skips the taken one
+  });
+
+  it('nectar_at() reads a flower in sight: its nectar, 0 when emptied, None for bare ground or out of sight', () => {
+    const world = simulate(meadow('print(nectar_at([3, 6]), nectar_at([4, 4]), nectar_at([9, 6]))\nmove_to([3, 6])\nwhile collect():\n    pass\nprint(nectar_at([3, 6]))\nwhile True:\n    wait(100)'), 200);
+    const [first, after] = printed(world);
+    expect(first).toMatch(/^\d+ None None$/);
+    expect(Number(first.split(' ')[0])).toBeGreaterThan(0);
+    expect(after).toBe('0');
+  });
+
+  it('is for bees: the queen gets a clear message', () => {
+    const world = simulate(meadow('while True:\n    wait(100)'), 0);
+    const q = new World({ forager: parse(IDLE_QUEEN), queen: parse('print(flowers_near())'), shared: SHARED }, 1);
+    simulate(q, 3);
+    expect(q.error?.message).toMatch(/flowers_near\(\) is for worker bees/);
+    expect(world.error).toBeNull();
+  });
+});

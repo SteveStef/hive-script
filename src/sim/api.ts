@@ -206,6 +206,15 @@ export function beeGlobals(colony: Colony, bee: Bee): Record<string, Value> {
       const f = world.nearestFlower(bee);
       return f ? [f.x, f.y] : null;
     }),
+    flowers_near: builtin('flowers_near', (args, line) => {
+      expectArgs('flowers_near', args, 0, line);
+      return world.flowersNear(bee).map(f => [f.x, f.y]);
+    }),
+    nectar_at: builtin('nectar_at', (args, line) => {
+      expectArgs('nectar_at', args, 1, line);
+      const [x, y] = position(colony, 'nectar_at', args[0], line);
+      return world.nectarAt(bee, { x, y });
+    }),
     smell: builtin('smell', (args, line) => {
       expectArgs('smell', args, 1, line);
       const t = colony.strongestScent(bee, scentName('smell', args[0], line));
@@ -219,7 +228,7 @@ export function beeGlobals(colony: Colony, bee: Bee): Record<string, Value> {
 }
 
 // Worker actions the queen might reach for; each gets a clear explanation instead of "not defined".
-const WORKER_ONLY = ['move', 'move_to', 'go_home', 'collect', 'deposit', 'eat', 'build', 'mark', 'die', 'role', 'steal', 'sting', 'health', 'max_health', 'enemies_near'];
+const WORKER_ONLY = ['move', 'move_to', 'go_home', 'collect', 'deposit', 'eat', 'build', 'mark', 'die', 'role', 'steal', 'sting', 'health', 'max_health', 'enemies_near', 'flowers_near', 'nectar_at'];
 
 /** Everything the queen's script (queen.bee) can see. */
 export function queenGlobals(colony: Colony): Record<string, Value> {

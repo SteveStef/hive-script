@@ -174,7 +174,8 @@ Key ideas:
 - **Each bee gets 50 operations per tick**, so an infinite loop can't freeze the game.
 - **One bee per tile** (the hive holds any number). `move()` fails into an occupied tile;
   `move_to()` steers around bees and gives up if blocked too long; `nearest_flower()` skips
-  flowers another bee is on.
+  flowers another bee is on. `flowers_near()` lists every flower with nectar in sight (6 tiles),
+  nearest first, taken or not, and `nectar_at(position)` reads one, so a script can choose.
 - **The economy limits the colony, not a fixed number.** Each egg costs 10 honey and every
   bee or egg needs a cell of comb; workers `build()` more comb from 15 honey. Flowers can
   only feed so many bees, and winter eats into stores, so a queen who lays too eagerly
