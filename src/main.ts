@@ -93,7 +93,13 @@ let remote = new RemoteColony();
 let socket: WebSocket | null = null;
 let colonyExists = false;
 let tickMs = 133;
-let lastStateAt = 0;
+// Live updates play a couple of ticks behind the server, at its pace, so one that arrives late (or
+// several that arrive together) doesn't stop the bees and then jump them forward.
+const LIVE_BUFFER = 2; // updates held back
+const LIVE_SKIP = 12; // more waiting than this (a tab back from the background): skip to the newest
+const pending: ColonyJson[] = [];
+let shownAt = 0; // when the update on screen started, on the performance.now() clock
+let shownFor = 133; // how long it stays on screen
 // the player's world as the world map last showed it, and the map being watched
 let overview: WorldOverview | null = null;
 let worldTimer = 0;
@@ -188,6 +194,7 @@ async function enter(next: Mode): Promise<void> {
     setRunning(false);
   } else {
     remote = new RemoteColony();
+    dropLive();
     await openColony();
   }
 }
@@ -200,6 +207,7 @@ async function leave(): Promise<void> {
   const s = socket;
   socket = null;
   s?.close();
+  dropLive();
   closeWorld();
   showPane('log');
   mapBar.hidden = true;
@@ -522,15 +530,11 @@ function openSocket(): void {
     } else if (msg.type === 'chat') addChat(chatRow(msg.message), msg.message.username !== username);
     else if (msg.type === 'chat-problem') addChat(problemRow(msg.problem), false);
     else if (msg.type === 'over') {
+      pending.length = 0; // updates from before the colony ended
       colonyExists = false;
       selected = null;
       void openWorld();
-    } else {
-      remote.update(msg.colony);
-      lastStateAt = performance.now();
-      colonyExists = msg.colony.colony !== null;
-      setLive(`Live · tick ${remote.tick.toLocaleString('en-US')}`, true);
-    }
+    } else pending.push(msg.colony);
   });
   ws.addEventListener('close', e => {
     if (socket !== ws) return; // closed on purpose, by leaving
@@ -544,6 +548,43 @@ function openSocket(): void {
       if (socket === ws && mode === 'multi') openSocket();
     }, RECONNECT_MS);
   });
+}
+
+/** Puts a live update on screen. */
+function showLive(json: ColonyJson): void {
+  remote.update(json);
+  colonyExists = json.colony !== null;
+  setLive(`Live · tick ${remote.tick.toLocaleString('en-US')}`, true);
+}
+
+/**
+ * Shows the next live update when it's due, and says how far into it the screen is (0 to 1).
+ * Updates play at the server's pace, a little faster while more than LIVE_BUFFER are waiting and
+ * a little slower while fewer are, so the buffer refills after a stall and drains after a burst.
+ */
+function playLive(now: number): number {
+  if (pending.length > LIVE_SKIP) {
+    while (pending.length > LIVE_BUFFER) showLive(pending.shift()!);
+    shownAt = now;
+  }
+  if (!shownAt) {
+    if (!pending.length) return 0;
+    showLive(pending.shift()!);
+    shownAt = now;
+    shownFor = tickMs;
+  } else if (pending.length && now - shownAt >= shownFor) {
+    showLive(pending.shift()!);
+    const due = shownAt + shownFor;
+    shownAt = now - due < 50 ? due : now; // on the beat, unless it waited on a late update
+    shownFor = tickMs * (pending.length > LIVE_BUFFER ? 0.85 : pending.length < LIVE_BUFFER ? 1.15 : 1);
+  }
+  return Math.min(1, (now - shownAt) / shownFor);
+}
+
+/** Forgets updates still waiting to be shown, as when the colony is founded or the player leaves. */
+function dropLive(): void {
+  pending.length = 0;
+  shownAt = 0;
 }
 
 function setLive(text: string, on: boolean | null): void {
@@ -703,6 +744,7 @@ async function found(map: Tile, hive: Tile): Promise<void> {
     await flushSaves();
     await api.startColony(set, map, hive);
     sourceLines = linesOf(set);
+    dropLive(); // updates from before the colony existed
     colonyExists = true;
     placing = null;
     clearView();
@@ -1201,8 +1243,8 @@ function frame(now: number): void {
       if (!local.running) setRunning(false);
       frac = running ? acc : 0;
     }
-  } else if (lastStateAt) {
-    frac = Math.min(1, (now - lastStateAt) / tickMs);
+  } else {
+    frac = playLive(now);
   }
   const w = view();
   if (w.tick > 0) music.play(w.season);

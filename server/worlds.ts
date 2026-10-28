@@ -9,6 +9,7 @@ import { loadScripts } from './scripts';
 
 export const MAPS: [number, number] = [5, 5]; // maps across and down in every world
 const SAVE_MS = 15_000; // how often every world is saved, besides on shutdown
+const MAX_BEHIND = 3; // ticks the clock may run late before it carries on from now instead of rushing to catch up
 const AWAY_LIMIT = 200; // events shown under "while you were away"
 const CHAT_MAX = 280; // characters in one chat message
 const CHAT_HISTORY = 50; // messages a player sees on arriving
@@ -81,7 +82,11 @@ export class WorldServer {
   private readonly watchers = new Map<WebSocket, Watcher>();
   private readonly lastChat = new Map<number, number>(); // player -> when they last sent a message
   private timer: NodeJS.Timeout | null = null;
+  private stopped = false;
   private ticking: Promise<void> = Promise.resolve();
+  // database writes run in order in the background, so a slow write never holds up a tick
+  private writes: Promise<void> = Promise.resolve();
+  private saving = false;
   private savedAt = Date.now();
 
   constructor(
@@ -117,17 +122,45 @@ export class WorldServer {
     }
   }
 
+  /**
+   * Runs the clock: a tick every tickMs, each timed from when the last one was due, so ticks stay
+   * evenly spaced. One that runs late is followed by the next straight away, but after a long
+   * stall the clock carries on from now, rather than sending a burst of ticks to every player.
+   */
   start(tickMs: number): void {
-    this.timer = setInterval(() => {
-      this.ticking = this.ticking.then(() => this.tick()).catch(e => console.error('tick failed', e));
-    }, tickMs);
+    let due = Date.now() + tickMs;
+    const loop = () => {
+      this.ticking = this.tick().catch(e => console.error('tick failed', e));
+      void this.ticking.then(() => {
+        if (this.stopped) return;
+        const now = Date.now();
+        due += tickMs;
+        if (now - due > MAX_BEHIND * tickMs) due = now;
+        this.timer = setTimeout(loop, Math.max(0, due - now));
+      });
+    };
+    this.timer = setTimeout(loop, tickMs);
   }
 
   /** Stops the clock and saves every world, for a clean shutdown. */
   async stop(): Promise<void> {
-    if (this.timer) clearInterval(this.timer);
+    this.stopped = true;
+    if (this.timer) clearTimeout(this.timer);
     await this.ticking;
     await this.saveAll();
+    await this.flush();
+  }
+
+  /** Waits for every database write queued so far. */
+  async flush(): Promise<void> {
+    await this.writes;
+  }
+
+  /** Queues a database write behind the others; the promise settles when it's done. */
+  private write(job: () => Promise<unknown>): Promise<void> {
+    const done = this.writes.then(job).then(() => undefined);
+    this.writes = done.catch(e => console.error('database write failed', e));
+    return done;
   }
 
   /** One tick for every world: step, record each colony's events, retire colonies that died out, save now and then, and show watchers. */
@@ -143,21 +176,28 @@ export class WorldServer {
           c.shieldEnds = null;
           c.say(null, 'Our protection as a new colony has ended. From now on other players can raid and sting us, and wild wasps hunt our bees on their maps.', 'raid');
         }
-        await this.recordEvents(seat);
+        this.recordEvents(seat);
         if (seat.colony.over) await this.retire(seat);
       }
       this.broadcast(live);
     }
-    if (Date.now() - this.savedAt >= SAVE_MS) await this.saveAll();
+    // a world's snapshot is taken now, between ticks; writing it waits in the background
+    if (Date.now() - this.savedAt >= SAVE_MS && !this.saving) {
+      this.saving = true;
+      void this.saveAll()
+        .catch(() => undefined) // already logged by write()
+        .finally(() => (this.saving = false));
+    }
   }
 
-  private async recordEvents(seat: Seat): Promise<void> {
+  /** Queues the colony's new log events for the database ("while you were away"). */
+  private recordEvents(seat: Seat): void {
     const c = seat.colony;
     const fresh = c.log.filter(l => l.seq > seat.loggedSeq && l.tone);
     seat.loggedSeq = c.logCount - 1;
     if (!fresh.length) return;
     const rows = fresh.map(l => ({ user_id: seat.userId, tick: l.tick, tone: l.tone ?? null, text: l.who === null ? l.text : `${l.who === 'queen' ? 'Queen' : `Bee #${l.who}`}: ${l.text}` }));
-    await this.sql`INSERT INTO events ${this.sql(rows, 'user_id', 'tick', 'tone', 'text')}`;
+    this.write(() => this.sql`INSERT INTO events ${this.sql(rows, 'user_id', 'tick', 'tone', 'text')}`).catch(() => undefined); // logged by write()
   }
 
   /**
@@ -193,12 +233,13 @@ export class WorldServer {
 
   private async saveAll(): Promise<void> {
     this.savedAt = Date.now();
-    for (const live of this.worlds.values()) await this.save(live);
+    await Promise.all([...this.worlds.values()].map(live => this.save(live)));
   }
 
-  private async save(live: Live): Promise<void> {
+  /** Saves a world as it is now; the write itself joins the queue, so saves land in order. */
+  private save(live: Live): Promise<void> {
     const state = live.world.save();
-    await this.sql`UPDATE worlds SET state = ${this.sql.json(state as never)}, tick = ${state.tick}, updated_at = now() WHERE id = ${live.id}`;
+    return this.write(() => this.sql`UPDATE worlds SET state = ${this.sql.json(state as never)}, tick = ${state.tick}, updated_at = now() WHERE id = ${live.id}`);
   }
 
   /** Each watcher of a world gets the map they're watching, and their own colony. */

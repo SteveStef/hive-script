@@ -123,6 +123,7 @@ describe('the shared world', () => {
     app.inject({ method: 'POST', url: '/api/colony/start', payload: { set: files, map }, ...as(cookie) });
   const ticks = async (n: number) => {
     for (let i = 0; i < n; i++) await worlds.tick();
+    await worlds.flush(); // events and saves are written in the background
   };
 
   it('founds a colony with its hive where the player put it, and refuses a spot the skep does not fit', async () => {
