@@ -73,7 +73,7 @@ describe('the starting scripts', () => {
       simulate(world, SEASON_TICKS);
       expect(world.error).toBeNull();
       expect(world.colony.over).toBeNull();
-      expect(world.colony.totalHoney).toBeGreaterThan(30);
+      expect(world.colony.totalHoney).toBeGreaterThan(20);
       expect(world.colony.log.some(l => l.text === 'Hatched.')).toBe(true);
       simulate(world, year - SEASON_TICKS);
       expect(world.colony.over).not.toBeNull();

@@ -163,7 +163,8 @@ export class Renderer {
     if (a?.kind === 'move') {
       const next = a.path[0];
       // stepLeft counts down from MOVE_TICKS on the tick the tile is claimed, so a 6-tick hop draws as 0/6..6/6
-      const t = a.moving ? Math.min(1, (MOVE_TICKS - a.stepLeft + frac) / MOVE_TICKS) : 0; // 0 while waiting for the tile
+      const hop = a.hop ?? MOVE_TICKS; // a chasing wild wasp flies faster
+      const t = a.moving ? Math.min(1, (hop - a.stepLeft + frac) / hop) : 0; // 0 while waiting for the tile
       x += (next.x - bee.x) * TILE * t;
       y += (next.y - bee.y) * TILE * t;
       z = 9;

@@ -110,6 +110,9 @@ export const VISITOR_CHANCE = 0.5; // single player: the chance a lone wild wasp
 export const VISITOR_KILLS = 4; // bees a visitor stings to death before it's had its fill and flies off
 export const VISITOR_CARRY = 300; // ticks a visitor flies around with its catch, not hunting, after each kill
 export const VISITOR_PATIENCE = 600; // ticks a visitor hunts without a kill before it gives up and flies off
+export const WILD_SIGHT = 4; // tiles a wild wasp spots a bee from; then it chases that bee
+export const WILD_CHASE_TICKS = 4; // ticks per tile while chasing: half again as fast as a bee
+export const WILD_STING_TICKS = 3; // a wild wasp's quick jab, so a bee flying off can still be caught
 export const WILD_WANDER = 6; // tiles from the nest a wild wasp roams when it sees no one (never off the nest's map)
 
 // seasons
@@ -166,7 +169,7 @@ export interface Flower extends Tile {
 
 export type Action =
   // moving: false while waiting for the next tile to be free; waited: blocked ticks so far; single: from move(), which never steers
-  | { kind: 'move'; path: Tile[]; target: Tile; stepLeft: number; moving: boolean; waited: number; single: boolean }
+  | { kind: 'move'; path: Tile[]; target: Tile; stepLeft: number; moving: boolean; waited: number; single: boolean; hop?: number } // hop: ticks per tile, if not MOVE_TICKS
   | { kind: 'collect' | 'deposit' | 'eat' | 'build' | 'wait' | 'bump' | 'steal'; left: number }
   | { kind: 'mark'; left: number; scent: string }
   | { kind: 'sting'; left: number; target: Tile };
@@ -211,6 +214,8 @@ export interface Nest extends Tile {
   spawnIn: number; // ticks until the next wild wasp, while there are fewer than NEST_WASPS
   /** Where each wild wasp is wandering to, by wasp id. */
   roam: Record<number, Tile>;
+  /** The bee each wild wasp is chasing, by wasp id: kept until it's dead, home, or off the nest's map. */
+  chase?: Record<number, number>;
   /**
    * A lone wild wasp visiting single player's meadow, not a real nest: nothing is drawn or can be
    * stung here, the tile is just its anchor (the map's middle, or the edge it's leaving by).
@@ -1326,7 +1331,7 @@ export class World {
   private claim(bee: Bee, a: MoveAction): boolean {
     if (this.taken(a.path[0], bee)) return false;
     a.moving = true;
-    a.stepLeft = MOVE_TICKS;
+    a.stepLeft = a.hop ?? MOVE_TICKS;
     bee.facing = dirTowards(bee, a.path[0]);
     return true;
   }
@@ -1603,7 +1608,15 @@ export class World {
         if (this.moveTick(w, a) === 'going') return;
       } else {
         if (--a.left > 0) return;
-        if (a.kind === 'sting') this.strike(w, null, a.target);
+        if (a.kind === 'sting') {
+          // it stings the bee it's chasing, if that bee is still right next to it, wherever it moved
+          const chased = nest.chase?.[w.id];
+          for (const c of chased === undefined ? [] : this.colonies) {
+            const b = c.bees.find(b => b.id === chased);
+            if (b && Math.abs(b.x - w.x) + Math.abs(b.y - w.y) === 1) a.target = { x: b.x, y: b.y };
+          }
+          this.strike(w, null, a.target);
+        }
       }
       w.action = null;
     }
@@ -1622,26 +1635,37 @@ export class World {
     // a wild wasp guards its nest's own map: it hunts nobody beyond it, and never a protected colony's bees
     const nestMap = this.mapAt(nest);
     const leashed = (t: Tile) => { const m = this.mapAt(t); return m.x === nestMap.x && m.y === nestMap.y; };
-    let prey: Bee | null = null;
-    let best = Infinity;
+    const chase = (nest.chase ??= {});
+    const huntable = (b: Bee, c: Colony) => !c.shielded && leashed(b) && !this.isHive(b);
     const carrying = !!nest.visitor && this.tick < nest.visitor.lastKill; // still flying around with its last catch
-    for (const c of carrying ? [] : this.colonies) {
-      if (c.shielded) continue;
+    // the bee it's already chasing, as long as it's alive, out of its hive and on the nest's map
+    let prey: Bee | null = null;
+    if (!carrying && chase[w.id] !== undefined) {
+      for (const c of this.colonies) {
+        const b = c.bees.find(b => b.id === chase[w.id]);
+        if (b && huntable(b, c)) prey = b;
+      }
+    }
+    // otherwise the nearest bee it can spot
+    let best = Infinity;
+    for (const c of prey || carrying ? [] : this.colonies) {
       for (const b of c.bees) {
         const d = Math.hypot(b.x - w.x, b.y - w.y);
-        if (d <= SENSE_RANGE && d < best && leashed(b) && !this.isHive(b)) {
+        if (d <= WILD_SIGHT && d < best && huntable(b, c)) {
           prey = b;
           best = d;
         }
       }
     }
     if (prey) {
+      chase[w.id] = prey.id;
       if (Math.abs(prey.x - w.x) + Math.abs(prey.y - w.y) === 1) {
         if (prey.x !== w.x) w.facing = prey.x > w.x ? 'east' : 'west';
-        w.action = { kind: 'sting', left: STING_TICKS, target: { x: prey.x, y: prey.y } };
-      } else this.stepToward(w, prey);
+        w.action = { kind: 'sting', left: WILD_STING_TICKS, target: { x: prey.x, y: prey.y } };
+      } else this.stepToward(w, prey, WILD_CHASE_TICKS);
       return;
     }
+    delete chase[w.id];
     // nobody to sting: roam to a spot near the nest, then rest a while
     let spot = nest.roam[w.id];
     if (!spot || (spot.x === w.x && spot.y === w.y)) {
@@ -1722,7 +1746,7 @@ export class World {
   }
 
   /** One tile toward a target, along whichever way is free; waits a moment when both are blocked. */
-  private stepToward(w: Bee, t: Tile): boolean {
+  private stepToward(w: Bee, t: Tile, hop?: number): boolean {
     const dx = Math.sign(t.x - w.x);
     const dy = Math.sign(t.y - w.y);
     const xs = { x: w.x + dx, y: w.y };
@@ -1731,7 +1755,7 @@ export class World {
     if (this.hedges.size) options.unshift(this.plan(w, t)[0] ?? null); // the way around a hedge comes first
     for (const next of options) {
       if (!next || this.blocked(next) || this.taken(next, w) || this.isHive(next)) continue; // wild wasps keep out of hives
-      const a: MoveAction = { kind: 'move', path: [next], target: next, stepLeft: 0, moving: false, waited: 0, single: true };
+      const a: MoveAction = { kind: 'move', path: [next], target: next, stepLeft: 0, moving: false, waited: 0, single: true, hop };
       w.action = a;
       this.claim(w, a);
       return true;
@@ -1875,13 +1899,15 @@ export function bloom(seed: number, year: number, season: Exclude<Season, 'winte
   const centers: Tile[] = [];
   const flowers: Flower[] = [];
   for (let p = 0; p < b.patches; p++) {
+    // spring's first patch grows within sight of home, so a new colony's first bee always finds food
+    const far = season === 'spring' && p === 0 ? Math.min(b.far, SENSE_RANGE - 1) : b.far;
     let center: Tile | null = null;
     for (let tries = 0; tries < 200 && !center; tries++) {
       const x = Math.floor(rnd() * COLS);
       const y = Math.floor(rnd() * ROWS);
       const d = Math.hypot(x - hive.x, y - hive.y);
       // patches keep at least 3 tiles apart, so they read as separate patches
-      if (d >= b.near && d <= b.far && free(x, y) && centers.every(c => Math.hypot(c.x - x, c.y - y) > 3)) center = { x, y };
+      if (d >= b.near && d <= far && free(x, y) && centers.every(c => Math.hypot(c.x - x, c.y - y) > 3)) center = { x, y };
     }
     if (!center) continue;
     centers.push(center);

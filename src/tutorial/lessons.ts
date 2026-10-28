@@ -386,7 +386,7 @@ export const LESSONS: Lesson[] = [
     intro: `
       <p>Some multiplayer maps hold a wild wasp nest. Its wasps sting anyone's bees nearby (never inside a hive), and nobody can found a colony on its map until it's destroyed.
       A nest has 60 health; ${fn('sting', 'nest position')} from the tile beside it hurts it.</p>
-      <p>Fights hurt: ${fn('health')} reads a unit's health, and ${fn('eat')} at the hive heals 2 per honey. You have two wasps.
+      <p>Fights hurt: ${fn('health')} reads a unit's health, and ${fn('eat')} at the hive heals 2 per honey. You have three wasps, and wild ones fight hard: they lock onto a target and chase it.
       <b>Do this:</b> destroy the nest at ${code('[24, 6]')} (it has a wild wasp guarding it).</p>`,
     tabs: ['wasp'],
     starter: { wasp: 'move_to([23, 6])\nsting([24, 6])\n' },
@@ -397,12 +397,13 @@ export const LESSONS: Lesson[] = [
       w.addNest({ x: 24, y: 6 }, 1);
       w.spawn(w.colony, 'wasp');
       w.spawn(w.colony, 'wasp');
-      w.colony.honey = 40;
+      w.spawn(w.colony, 'wasp');
+      w.colony.honey = 60;
     }),
     goals: [{ text: 'The nest is destroyed', check: w => w.nests.length === 0 }],
     hints: [
       'One sting() then the script ends. Loop: sting the wild wasp when it\'s next to you, otherwise the nest.',
-      'Two wasps can\'t share a tile: send the second to [24, 5] if [23, 6] is taken (owner_at tells you).',
+      'Wasps can\'t share a tile: send another to [24, 5] if [23, 6] is taken (owner_at tells you).',
       'Low on health? go_home() and eat() heals, then go back.',
     ],
     recap: 'Health, healing and teamwork: fights are won by scripts that know when to retreat.',

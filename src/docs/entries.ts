@@ -1,7 +1,7 @@
 import {
   BEE_CAPACITY, BEE_HEALTH, BEE_STING_DAMAGE, HEALTH_PER_HONEY, NEST_BUILD_TICKS, NEST_COST, NEST_HEALTH, STEAL_TICKS, STING_DAMAGE, STING_TICKS, WASP_CAPACITY, WASP_COST, WASP_HEALTH,
   BEE_COST, BUILD_COST, BUILD_TICKS, COLLECT_TICKS, DEPOSIT_TICKS, EAT_TICKS, ENERGY_PER_HONEY, HATCH_TICKS, LAY_TICKS,
-  BLOOMS, MARK_TICKS, MOVE_TICKS, SCENT_LIFE, SCENT_MAX, SEASON_TICKS, SENSE_RANGE, SHARED_LINE_BASE, SMELL_RANGE, VISITOR_KILLS, WINTER_IDLE,
+  BLOOMS, MARK_TICKS, MOVE_TICKS, SCENT_LIFE, SCENT_MAX, SEASON_TICKS, SENSE_RANGE, SHARED_LINE_BASE, SMELL_RANGE, VISITOR_KILLS, WILD_SIGHT, WINTER_IDLE,
   type Programs, type WorldOptions,
 } from '../sim/world';
 import { parse } from '../lang/parser';
@@ -313,7 +313,7 @@ export const DOCS: Record<string, DocEntry> = {
   },
   enemies_near: {
     section: 'Raids and wasps',
-    details: `Where the enemies are: other colonies' bees and wasps, and wild wasps, within ${SENSE_RANGE} tiles, nearest first. Protected new colonies aren't counted, since they can't be fought. In single player, now and then a lone wild wasp visits for a season: it hunts bees out in the open (never in the hive), flies off after ${VISITOR_KILLS} kills, and gives up sooner if it catches nobody, so hiding, or three bee stings, beats it. Wild wasps keep a nest on some unclaimed maps in multiplayer, and sting anyone's bees on that map (never inside a hive, and never a protected colony's). This clip hangs a nest nearby: the bee peeks, sees them, and flees home.`,
+    details: `Where the enemies are: other colonies' bees and wasps, and wild wasps, within ${SENSE_RANGE} tiles, nearest first. Protected new colonies aren't counted, since they can't be fought. Wild wasps spot a bee within ${WILD_SIGHT} tiles and chase it, faster than a bee flies, until it's dead or safe in its hive. In single player, now and then a lone wild wasp visits for a season: it hunts bees out in the open (never in the hive), flies off after ${VISITOR_KILLS} kills, and gives up sooner if it catches nobody, so hiding, or three bee stings, beats it. Wild wasps keep a nest on some unclaimed maps in multiplayer, and sting anyone's bees on that map (never inside a hive, and never a protected colony's). This clip hangs a nest nearby: the bee peeks, sees them, and flees home.`,
     returns: 'A list of positions, like [[9, 4], [10, 4]]; empty when no one is in sight.',
     time: instant,
     demo: { forager: 'print("near the hive:", enemies_near())\nmove_to([5, 4])\nprint("closer:", enemies_near())\ngo_home()', view: [0, 0, 13, 9], nest: [11, 3], nestWasps: 2, honey: 10, length: 260 },

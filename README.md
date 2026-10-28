@@ -93,7 +93,8 @@ nectar, and can `sting()` an enemy on the next tile for 5 damage, as often as it
 can `sting()` too, but only once: 10 damage, and the bee dies when the sting lands (a miss costs
 nothing), leaving a "danger" scent its colony can smell. Bees can't sting nests. A new account's wasp.bee only waits:
 what wasps do is up to the player. Each world also hangs three **wild wasp nests** on unclaimed maps: their
-wasps sting anyone's bees nearby (never inside a hive), a map with a nest can't be claimed,
+wasps spot any bee within 4 tiles and chase it, faster than a bee flies, until it's dead or home (they
+never sting inside a hive), a map with a nest can't be claimed,
 and a nest destroyed by players' wasps hangs again on a free map next spring. Wild wasps only
 hunt on their nest's own map. A **new colony is protected for 24 real hours**: other players
 can't raid or sting it and wild wasps leave it alone, its hive shimmers gold, and attacking
