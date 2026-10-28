@@ -1920,10 +1920,11 @@ export function bloom(seed: number, year: number, season: Exclude<Season, 'winte
     const near = first ? Math.min(b.near, far - 1) : b.near;
     let center: Tile | null = null;
     if (first) {
-      // picked from every tile that fits, since random tries can miss so small a ring
+      // picked from every tile that fits, since random tries can miss so small a ring; never on
+      // the map's edge, where multiplayer's hedges grow and the flowers would be lost
       const fits: Tile[] = [];
-      for (let y = 0; y < ROWS; y++) {
-        for (let x = 0; x < COLS; x++) {
+      for (let y = 1; y < ROWS - 1; y++) {
+        for (let x = 1; x < COLS - 1; x++) {
           const d = Math.hypot(x - hive.x, y - hive.y);
           if (d >= near && d <= far && free(x, y)) fits.push({ x, y });
         }

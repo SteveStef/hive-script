@@ -382,7 +382,9 @@ describe('seasons', () => {
   it('every spring, some flowers grow within sight of the hive, so a new colony always finds food', () => {
     for (let seed = 1; seed <= 500; seed++) {
       const spring = bloom(seed, 1 + (seed % 3), 'spring', HIVE_SPOT);
-      expect(spring.some(f => Math.hypot(f.x - HIVE_SPOT.x, f.y - HIVE_SPOT.y) <= SENSE_RANGE)).toBe(true);
+      // off the map's edge too, where multiplayer's hedges would take them
+      const inner = (f: { x: number; y: number }) => f.x > 0 && f.y > 0 && f.x < COLS - 1 && f.y < ROWS - 1;
+      expect(spring.some(f => inner(f) && Math.hypot(f.x - HIVE_SPOT.x, f.y - HIVE_SPOT.y) <= SENSE_RANGE)).toBe(true);
     }
   });
 
