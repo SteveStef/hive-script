@@ -1,7 +1,7 @@
 import { DEFAULT_SHARED } from '../defaultScript';
 import { parse } from '../lang/parser';
 import type { ScriptSet } from '../sim/scripts';
-import { SCENT_LIFE, SEASON_TICKS, SENSE_RANGE, World, type Programs, type ScriptFile, type WorldOptions } from '../sim/world';
+import { eggCost, SCENT_LIFE, SEASON_TICKS, SENSE_RANGE, World, type Programs, type ScriptFile, type WorldOptions } from '../sim/world';
 
 /** One goal of a lesson, checked against the running world after every tick. */
 export interface Goal {
@@ -362,6 +362,8 @@ export const LESSONS: Lesson[] = [
       A raider has to land on your hive for 10 ticks to steal: a wasp standing beside the hive has time to sting twice.
       Worker bees can ${fn('sting', 'position')} too, but only once: it does 10 damage, and the bee dies doing it.
       While a raider sits on your hive, a red banner over the meadow says so. In single player there are no raiders, but now and then a lone wild wasp visits for a season and hunts bees in the open. Wasps grow old like bees, so in a real game the queen keeps replacing them.</p>
+      <p>Later, the queen can lay stronger units by naming stats: ${code('lay(type="wasp", damage=8)')} hatches a wasp with an 8-damage sting, for ${eggCost('wasp', { damage: 8 })} honey instead of 30.
+      Energy, capacity, damage and health can each go up to ten times the default, and the price climbs fast; ${fn('egg_cost', '...')} tells the queen a build's price before she lays, and clicking a unit shows its build.</p>
       <p><b>Do this:</b> you've saved 200 honey. Build a nest, lay a wasp, and make wasp.bee guard the hive until it stings a raider to death.</p>`,
     tabs: ['queen', 'wasp'],
     starter: { queen: 'while True:\n    wait(100)\n', wasp: '# wasp.bee: every wasp runs this.\nwhile True:\n    wait(100)\n' },

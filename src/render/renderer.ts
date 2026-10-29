@@ -63,7 +63,8 @@ export function insideHive(world: ColonyView, bee: Unit & { owner?: string | nul
   const at = (t: Tile) => t.x === bee.x && t.y === bee.y;
   // wasps live in their colony's nest, and go inside it as bees go into the hive
   if (mine) return world.atHive(bee) || (bee.role === 'wasp' && !!world.nest && at(world.nest));
-  if (bee.owner == null) return false;
+  // wild wasps shelter in their paper nest (all winter long)
+  if (bee.owner == null) return world.nests.some(n => n.wild && at(n));
   if (world.otherHives.some(h => h.owner === bee.owner && at(h))) return true;
   return bee.role === 'wasp' && world.nests.some(n => !n.wild && n.owner === bee.owner && at(n));
 }
@@ -302,9 +303,9 @@ export class Renderer {
         const y = n.y * TILE + 15 - sprite.height;
         g.drawImage(sprite, x, y);
         if (n.health < n.maxHealth) this.drawHealth(n.x * TILE + 8, y - 3, n.health, n.maxHealth);
-        // how many wasps are inside a colony's nest
+        // how many wasps are inside the nest
         const own = !n.wild && !!world.nest && world.nest.x === n.x && world.nest.y === n.y;
-        const home = n.wild ? 0 : own
+        const home = own
           ? world.bees.filter(b => b.x === n.x && b.y === n.y && insideHive(world, b, true)).length
           : world.visitors.filter(b => b.x === n.x && b.y === n.y && insideHive(world, b, false)).length;
         if (home) this.drawText(String(home), n.x * TILE + 8, y - (n.health < n.maxHealth ? 10 : 7));
