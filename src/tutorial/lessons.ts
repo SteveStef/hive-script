@@ -1,7 +1,7 @@
 import { DEFAULT_SHARED } from '../defaultScript';
 import { parse } from '../lang/parser';
 import type { ScriptSet } from '../sim/scripts';
-import { eggCost, SCENT_LIFE, SEASON_TICKS, SENSE_RANGE, World, type Programs, type ScriptFile, type WorldOptions } from '../sim/world';
+import { eggCost, NEST_HEALTH, SCENT_LIFE, SEASON_TICKS, SENSE_RANGE, World, type Programs, type ScriptFile, type WorldOptions } from '../sim/world';
 
 /** One goal of a lesson, checked against the running world after every tick. */
 export interface Goal {
@@ -320,7 +320,7 @@ export const LESSONS: Lesson[] = [
       <p><b>Do this:</b> your map has no flowers. Send a bee to collect on the map east of yours.</p>`,
     tabs: ['forager'],
     starter: { forager: 'print("our map:", my_map())\nwhile True:\n    wait(100)\n' },
-    solution: { forager: 'print("our map:", my_map())\nmove_to([22, 6])\nwhile True:\n    f = nearest_flower()\n    move_to(f)\n    collect()\n    go_home()\n    deposit()\n' },
+    solution: { forager: 'print("our map:", my_map())\nwhile True:\n    move_to([22, 6])  # through the gate, next door\n    f = nearest_flower()\n    if f:\n        move_to(f)\n        collect()\n    go_home()\n    deposit()\n    eat()\n' },
     world: practice([[23, 5], [24, 5], [23, 6], [24, 7], [25, 6]], () => {}),
     goals: [{ text: 'A bee collects on map [1, 0]', check: w => w.flowers.some(f => f.x >= 20 && f.nectar < f.max) }],
     hints: [
@@ -335,7 +335,7 @@ export const LESSONS: Lesson[] = [
     topic: 'Multiplayer',
     title: 'Raids',
     intro: `
-      <p>Honey can be taken. A bee at another colony's hive can ${fn('steal')} as much of its honey as it can carry, and ${fn('deposit')} it at home.
+      <p>Honey can be taken. A bee at another colony's hive can ${fn('steal')} as much of its honey as it can carry, and ${fn('deposit')} it at home. Only bees steal: wasps, which you'll meet next, fight but carry nothing.
       ${fn('owner_at', 'position')} says whose hive or bee is on a tile.</p>
       <p>In multiplayer a new colony is protected for its first 24 hours: nobody can raid or sting it, and ${fn('shielded', 'position')} tells you so.
       Attacking another player ends your own protection early. Other players' bees and wasps have a red edge, so you can tell them from yours. The rival's hive here is at ${code('[22, 6]')}, full of honey, with no guards and no protection. <b>Do this:</b> bring 5 stolen honey home.</p>`,
@@ -357,13 +357,13 @@ export const LESSONS: Lesson[] = [
     title: 'Wasps',
     intro: `
       <p>The rival's bees are raiding <i>you</i> now. Defense is code: <b>wasps</b>. They don't come cheap: first the colony saves up 150 honey,
-      and the queen builds its wasp nest with ${fn('build_nest', '[x, y]')} on a free tile of your map. Then ${code('lay("wasp")')} raises wasps, 30 honey each; they hatch at the nest, live there (no comb needed), and run <b>wasp.bee</b>.</p>
+      and the queen builds its wasp nest with ${fn('build_nest', '[x, y]')} on a free tile of your map. Then ${code('lay("wasp")')} raises wasps, 30 honey each; they hatch at the nest, live there (no comb needed; ${fn('go_home')} takes a wasp to its nest, where it can eat), and run <b>wasp.bee</b>.</p>
       <p>Wasps have 30 health (bees 10), can't collect, and ${fn('sting', 'position')} an enemy on the tile right next to them for 5 damage. ${fn('enemies_near')} lists enemies in sight.
       A raider has to land on your hive for 10 ticks to steal: a wasp standing beside the hive has time to sting twice.
       Worker bees can ${fn('sting', 'position')} too, but only once: it does 10 damage, and the bee dies doing it.
       While a raider sits on your hive, a red banner over the meadow says so. In single player there are no raiders, but now and then a lone wild wasp visits for a season and hunts bees in the open. Wasps grow old like bees, so in a real game the queen keeps replacing them.</p>
       <p>Later, the queen can lay stronger units by naming stats: ${code('lay(type="wasp", damage=8)')} hatches a wasp with an 8-damage sting, for ${eggCost('wasp', { damage: 8 })} honey instead of 30.
-      Energy, capacity, damage and health can each go up to ten times the default, and the price climbs fast; ${fn('egg_cost', '...')} tells the queen a build's price before she lays, and clicking a unit shows its build.</p>
+      Energy, damage, health and a bee's capacity can each go up to ten times the default, and the price climbs fast; ${fn('egg_cost', '...')} tells the queen a build's price before she lays, and clicking a unit shows its build.</p>
       <p><b>Do this:</b> you've saved 200 honey. Build a nest, lay a wasp, and make wasp.bee guard the hive until it stings a raider to death.</p>`,
     tabs: ['queen', 'wasp'],
     starter: { queen: 'while True:\n    wait(100)\n', wasp: '# wasp.bee: every wasp runs this.\nwhile True:\n    wait(100)\n' },
@@ -388,15 +388,16 @@ export const LESSONS: Lesson[] = [
     intro: `
       <p>Some multiplayer maps hold a wild wasp nest. Its wasps sting anyone's bees nearby (never inside a hive), and nobody can found a colony on its map until it's destroyed.
       A nest has 60 health; ${fn('sting', 'nest position')} from the tile beside it hurts it.</p>
-      <p>Fights hurt: ${fn('health')} reads a unit's health, and ${fn('eat')} at the hive heals 2 per honey. You have three wasps, and wild ones fight hard: they lock onto a target and chase it.
+      <p>Fights hurt: ${fn('health')} reads a unit's health, and ${fn('eat')} at home heals 2 per honey (a wasp's home is its nest, here at ${code('[5, 6]')}). You have three wasps, and wild ones fight hard: they lock onto a target and chase it.
       <b>Do this:</b> destroy the nest at ${code('[24, 6]')} (it has a wild wasp guarding it).</p>`,
     tabs: ['wasp'],
-    starter: { wasp: 'move_to([23, 6])\nsting([24, 6])\n' },
+    starter: { wasp: 'move_to([23, 6])\nif distance(get_pos(), [24, 6]) == 1:\n    sting([24, 6])\n' },
     solution: {
       wasp: 'nest = [24, 6]\nwhile True:\n    if health() <= 10:\n        go_home()\n        eat()  # heal before going back\n    else:\n        e = enemies_near()\n        if e and distance(get_pos(), e[0]) == 1:\n            sting(e[0])\n        elif distance(get_pos(), nest) == 1:\n            sting(nest)\n        elif owner_at([23, 6]) == None:\n            move_to([23, 6])\n        else:\n            move_to([24, 5])\n',
     },
     world: practice([], w => {
       w.addNest({ x: 24, y: 6 }, 1);
+      w.colony.nest = { x: 5, y: 6, health: NEST_HEALTH, maxHealth: NEST_HEALTH }; // the wasps hatch, and heal, at the colony's own nest
       w.spawn(w.colony, 'wasp');
       w.spawn(w.colony, 'wasp');
       w.spawn(w.colony, 'wasp');
@@ -404,7 +405,7 @@ export const LESSONS: Lesson[] = [
     }),
     goals: [{ text: 'The nest is destroyed', check: w => w.nests.length === 0 }],
     hints: [
-      'One sting() then the script ends. Loop: sting the wild wasp when it\'s next to you, otherwise the nest.',
+      'One sting() then the script ends, and only the wasp that got to [23, 6] stings at all. Loop: sting the wild wasp when it\'s next to you, otherwise the nest.',
       'Wasps can\'t share a tile: send another to [24, 5] if [23, 6] is taken (owner_at tells you).',
       'Low on health? go_home() and eat() heals, then go back.',
     ],

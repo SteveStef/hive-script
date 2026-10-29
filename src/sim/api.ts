@@ -30,6 +30,7 @@ function eggOrder(colony: Colony, name: string, args: Value[], named: Named, lin
     if (v === undefined) continue;
     const low = statDefault(role, stat);
     const high = low * BUILD_MAX;
+    if (low === 0) throw new ScriptError(`A ${role} carries nothing, so ${stat}= is for bees only.`, line);
     if (typeof v !== 'number' || !Number.isInteger(v)) throw new ScriptError(`${stat}= needs a whole number: from ${low} to ${high} for a ${role}.`, line);
     if (v < low || v > high) throw new ScriptError(`A ${role}'s ${stat} can be from ${low} (its default) up to ${high}, not ${v}.`, line);
     if (v > low) build[stat] = v;
@@ -149,7 +150,7 @@ export function beeGlobals(colony: Colony, bee: Bee): Record<string, Value> {
   const beeWork = (name: string, why: string) =>
     wasp
       ? builtin(name, (_args, line) => {
-          throw new ScriptError(`Wasps can't ${why}; that's work for bees. Wasps sting(), guard and steal().`, line);
+          throw new ScriptError(`Wasps can't ${why}; that's work for bees. Wasps sting() and guard.`, line);
         })
       : action(name);
 
@@ -186,7 +187,7 @@ export function beeGlobals(colony: Colony, bee: Bee): Record<string, Value> {
     build_nest: builtin('build_nest', (_args, line) => {
       throw new ScriptError(`The queen builds the wasp nest, from queen.bee: build_nest(position), for ${NEST_COST} honey.`, line);
     }),
-    steal: action('steal'),
+    steal: beeWork('steal', 'carry honey, so they can\'t steal()'),
     sting: builtin('sting', (args, line) => {
       expectArgs('sting', args, 1, line);
       const [x, y] = position(colony, 'sting', args[0], line);

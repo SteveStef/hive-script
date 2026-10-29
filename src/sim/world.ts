@@ -98,7 +98,7 @@ export const NEST_COST = 150; // honey for a colony's wasp nest
 export const NEST_BUILD_TICKS = 100;
 export const WASP_COST = 30; // honey per wasp egg, once there's a nest
 export const BEE_CAPACITY = 3;
-export const WASP_CAPACITY = 6; // honey a wasp can carry off in a raid
+export const WASP_CAPACITY = 0; // wasps carry nothing: they fight, and bees do the stealing
 
 /** Stats the queen can raise when she lays, like lay(type="wasp", energy=300, damage=8). */
 export const STATS = ['energy', 'capacity', 'damage', 'health'] as const;
@@ -128,7 +128,8 @@ export function eggCost(role: string, build: Build = {}): number {
   let cost = role === 'wasp' ? WASP_COST : BEE_COST;
   for (const stat of STATS) {
     const value = build[stat];
-    if (value !== undefined) cost += Math.round(BUILD_PRICE[stat] * (value / statDefault(role, stat) - 1) ** 2);
+    const base = statDefault(role, stat);
+    if (value !== undefined && base > 0) cost += Math.round(BUILD_PRICE[stat] * (value / base - 1) ** 2);
   }
   return cost;
 }
@@ -1111,8 +1112,12 @@ export class World {
       nextNestId: save.nextNestId ?? 1, nestsToRegrow: save.nestsToRegrow ?? 0,
     });
     w.rng = mulberry32(save.rng);
-    // saves from before custom builds: every unit has its role's default tank and sting
-    const stats = <T extends Body>(b: T): T => ({ ...b, maxEnergy: b.maxEnergy ?? MAX_ENERGY, damage: b.damage ?? statDefault(b.role, 'damage') });
+    // saves from before custom builds: every unit has its role's default tank and sting; and wasps,
+    // which no longer carry honey, keep only what they already hold, to deposit at home
+    const stats = <T extends Body>(b: T): T => ({
+      ...b, maxEnergy: b.maxEnergy ?? MAX_ENERGY, damage: b.damage ?? statDefault(b.role, 'damage'),
+      capacity: b.role === 'wasp' ? WASP_CAPACITY : b.capacity,
+    });
     for (const n of save.nests ?? []) w.nests.push({ ...n, wasps: n.wasps.map(b => ({ ...stats(b), runner: new Runner([], {}) })) });
     for (const cs of save.colonies) {
       const p = typeof programs === 'function' ? programs(cs) : programs;

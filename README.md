@@ -84,8 +84,9 @@ code from the top. The colony keeps running when the page is closed, and the log
 what happened while you were away. A colony that dies out frees its map and its player picks
 again. When every map is held, newcomers get a new world.
 
-Players can fight. Every bee has health (a wasp has more), and `eat()` at the hive heals.
-A bee or wasp at another colony's hive can `steal()` its honey and `deposit()` it at home.
+Players can fight. Every bee has health (a wasp has more), and `eat()` at home heals.
+A bee at another colony's hive can `steal()` its honey and `deposit()` it at home. Wasps carry
+nothing (`WASP_CAPACITY` is 0): they fight, and a raid that takes honey needs bees.
 Wasps take saving up for: the queen builds the colony's **wasp nest** with
 `build_nest(position)` for 150 honey, and only then lays **wasps** with `lay("wasp")`, which
 hatch at the nest and live there: wasps need no comb. Enemy wasps can sting a nest down. Every wasp runs **wasp.bee**, can't collect
@@ -113,7 +114,7 @@ A colony runs a script per role, each in its own editor tab:
   just a script; bees hatch into the role the queen names with `lay("builder")` and keep it
   for life. `role()`, `roles()` and `role_count()` let scripts ask about them.
 - **Custom builds**: the queen can lay any role stronger by naming stats,
-  `lay(type="wasp", energy=300, damage=8)`. Energy, capacity, damage and health each go
+  `lay(type="wasp", energy=300, damage=8)`. Energy, damage, health and a bee's capacity each go
   from the role's default up to `BUILD_MAX` (10) times it, for extra honey per egg of
   `BUILD_PRICE[stat] * (value / default - 1)²` (`eggCost()` in `world.ts`; scripts ask with
   `egg_cost(...)`). The prices were tuned with strategy races: a little extra capacity or

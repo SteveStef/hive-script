@@ -5,7 +5,7 @@ import { parse } from '../src/lang/parser';
 import {
   BEE_COST, BUILD_COST, HATCH_TICKS, LAY_TICKS, LIFESPAN_MAX, MARK_TICKS, MAX_ENERGY, MOVE_TICKS, SCENT_LIFE, SCENT_MAX,
   BLOOMS, bloom, bloomMap, COLS, hedgeLayout, HIVE_SPOT, inFootprint, NEW_COLONY, ROWS, seasonAt, START_HONEY, VISITOR_PATIENCE, SEASON_TICKS, SENSE_RANGE, SHARED_LINE_BASE, START_BEES, START_COMB, tileKey, World,
-  BEE_HEALTH, HATCH_TICKS as HATCH, NEST_BUILD_TICKS, NEST_COST, NEST_HEALTH, NEST_WASPS, STING_DAMAGE, STING_TICKS, WASP_CAPACITY, WASP_COST, WASP_HEALTH,
+  BEE_HEALTH, HATCH_TICKS as HATCH, NEST_BUILD_TICKS, NEST_COST, NEST_HEALTH, NEST_WASPS, STING_DAMAGE, STING_TICKS, WASP_COST, WASP_HEALTH,
   BEE_STING_DAMAGE, eggCost,
 } from '../src/sim/world';
 import { toJson } from '../src/sim/view';
@@ -630,14 +630,33 @@ describe('health, raids and wasps', () => {
     expect(world.colony.stolen).toBe(2);
   });
 
-  it('with a nest, the queen lays wasps for more honey; they are tougher, carry more, and run wasp.bee', () => {
+  it('with a nest, the queen lays wasps for more honey; they are tougher, carry nothing, and run wasp.bee', () => {
     const world = new World(programs('while True:\n    wait(100)', 'print(lay("wasp"))\nwhile True:\n    wait(100)', 'print(role(), health(), capacity())\nwhile True:\n    wait(100)'), 1, { nest: [5, 6] });
     world.colony.honey = WASP_COST;
     simulate(world, HATCH + 40);
     const wasp = world.colony.bees.find(b => b.role === 'wasp')!;
-    expect(wasp).toMatchObject({ health: WASP_HEALTH, maxHealth: WASP_HEALTH, capacity: WASP_CAPACITY });
+    expect(wasp).toMatchObject({ health: WASP_HEALTH, maxHealth: WASP_HEALTH, capacity: 0 });
     expect(world.colony.honey).toBe(0);
-    expect(printed(world)).toEqual(['True', `wasp ${WASP_HEALTH} ${WASP_CAPACITY}`]);
+    expect(printed(world)).toEqual(['True', `wasp ${WASP_HEALTH} 0`]);
+  });
+
+  it("wasps can't steal: only bees carry honey off, and a wasp's capacity can't be raised", () => {
+    const thief = new World(programs('wait(1000)', IDLE_QUEEN, 'move_to([12, 6])\nsteal()'), 1, { bees: 0, wasps: 1, rival: { x: 12, y: 6, honey: 20, owner: 'rival' } });
+    simulate(thief, 100);
+    expect(thief.error?.message).toMatch(/Wasps can't carry honey, so they can't steal\(\)/);
+    expect(thief.colonies[1].honey).toBe(20);
+    const build = simulate(new World(programs('wait(1000)', 'lay(type="wasp", capacity=6)'), 1, { bees: 0, nest: [5, 6], honey: 100 }), 5);
+    expect(build.error?.message).toMatch(/A wasp carries nothing, so capacity= is for bees only/);
+  });
+
+  it('a wasp from before the change keeps the honey it holds, and can still deposit it', () => {
+    const world = new World(programs('wait(1000)', IDLE_QUEEN, 'go_home()\nprint(deposit())\nwhile True:\n    wait(100)'), 1, { bees: 0, wasps: 1, nest: [5, 6] });
+    const save = JSON.parse(JSON.stringify(world.save()));
+    Object.assign(save.colonies[0].bees[0], { capacity: 6, carrying: 4, x: 8, y: 6 }); // an old wasp, back from a raid
+    const back = simulate(World.restore(programs('wait(1000)', IDLE_QUEEN, 'go_home()\nprint(deposit())\nwhile True:\n    wait(100)'), save), 100);
+    expect(back.colony.bees[0].capacity).toBe(0);
+    expect(printed(back)).toEqual(['4']);
+    expect(back.colony.honey).toBe(4);
   });
 
   it("a wasp's home is its nest: go_home() takes it there, at_hive() is True, and it eats and deposits there", () => {
@@ -1280,7 +1299,7 @@ describe('custom builds: lay(type="wasp", energy=300, damage=8)', () => {
     const cost = eggCost('wasp', { energy: 300, damage: 8 });
     expect(world.colony.honey).toBe(100 - cost - eggCost('forager', { capacity: 6 }));
     // the queen's lines and the two units' lines (the first egg of an empty colony hatches at once)
-    expect(printed(world).sort()).toEqual([String(cost), 'True', 'True', `forager 100 6 ${BEE_STING_DAMAGE} ${BEE_HEALTH}`, `wasp 300 ${WASP_CAPACITY} 8 ${WASP_HEALTH}`].sort());
+    expect(printed(world).sort()).toEqual([String(cost), 'True', 'True', `forager 100 6 ${BEE_STING_DAMAGE} ${BEE_HEALTH}`, `wasp 300 0 8 ${WASP_HEALTH}`].sort());
     expect(world.colony.bees.find(b => b.role === 'wasp')!.energy).toBeGreaterThan(MAX_ENERGY); // it hatched with a full 300 tank
   });
 

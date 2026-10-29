@@ -33,9 +33,10 @@ describe('tutorial lessons', () => {
       expect(world.error, JSON.stringify(world.error)).toBeNull();
       expect(met).toEqual(lesson.goals.map(() => true));
     });
-    it(`${lesson.id}: the starter doesn't`, () => {
-      const { met } = play(lesson, 'starter', lesson.budget);
+    it(`${lesson.id}: the starter doesn't, and runs without an error`, () => {
+      const { world, met } = play(lesson, 'starter', lesson.budget);
       expect(met.every(Boolean)).toBe(false);
+      expect(world.error, JSON.stringify(world.error)).toBeNull();
     });
   }
 });

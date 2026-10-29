@@ -46,7 +46,7 @@ export function beeCard(bee: BeeView, sourceLines: Record<ScriptFile, string[]>,
   const tank = bee.maxEnergy ?? MAX_ENERGY;
   // its build: each stat beside its role's default, the raised ones in bold
   const statOf: Record<Stat, number> = { energy: tank, capacity: bee.capacity, damage: bee.damage ?? statDefault(bee.role, 'damage'), health: bee.maxHealth };
-  const build = STATS.map(s => {
+  const build = STATS.filter(s => statDefault(bee.role, s) > 0).map(s => {
     const d = statDefault(bee.role, s);
     return `<dt>${s === 'health' ? 'Max health' : s[0].toUpperCase() + s.slice(1)}</dt><dd>${statOf[s] > d ? `<span class="raised">${statOf[s]}</span> (default ${d})` : `${statOf[s]} (default)`}</dd>`;
   }).join('');
@@ -60,8 +60,8 @@ export function beeCard(bee: BeeView, sourceLines: Record<ScriptFile, string[]>,
     <div class="card-head"><b>${wasp ? `Wasp #${bee.id}` : `Bee #${bee.id} · ${esc(bee.role)}`}</b><span class="badge ${status.tone}">${status.label}</span></div>
     <div class="card-line">${where}</div>
     <div class="meters">
-      <span class="k">${wasp ? 'Honey' : 'Nectar'}</span>${bar(bee.carrying, bee.capacity, 'nectar')}
-      <span>${bee.carrying} of ${bee.capacity}</span>
+      ${wasp && !bee.carrying ? '' : `<span class="k">${wasp ? 'Honey' : 'Nectar'}</span>${bar(bee.carrying, Math.max(bee.capacity, bee.carrying), 'nectar')}
+      <span>${bee.carrying} of ${Math.max(bee.capacity, bee.carrying)}</span>`}
       <span class="k">Health</span>${bar(bee.health, bee.maxHealth, healthTone)}
       <span>${alive ? `${bee.health} of ${bee.maxHealth}${bee.health < bee.maxHealth ? ' · eat() at the hive to heal' : ''}` : '0'}</span>
       <span class="k">Energy</span>${bar(bee.energy, tank, energyTone)}
