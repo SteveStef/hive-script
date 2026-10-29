@@ -118,8 +118,14 @@ p { margin: 0; }
 }
 .clip canvas { display: block; width: 100%; height: auto; image-rendering: pixelated; box-shadow: 0 0 0 2px var(--honey-ink); background: #6eab36; }
 .clip .out {
+  /* a fixed height, newest lines at the bottom: a long line that wraps pushes the oldest out of
+     view instead of growing the box, so the page below never jumps */
   margin: 8px 0 0;
-  min-height: 4.8em;
+  height: 6.4em;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-end;
   padding: 6px 10px;
   background: var(--code-bg);
   color: #e8e1cc;
@@ -129,6 +135,7 @@ p { margin: 0; }
   white-space: pre-wrap;
   box-shadow: 0 0 0 2px var(--honey-ink);
 }
+.clip .out span { display: block; flex: none; }
 .clip-hint { position: absolute; top: 14px; right: 14px; font-family: var(--font-mono); font-size: 10.5px; color: #fff; background: rgba(20, 12, 6, 0.6); padding: 1px 6px; opacity: 0; transition: opacity 0.15s; }
 .clip:hover .clip-hint, .clip:focus-within .clip-hint { opacity: 1; }
 

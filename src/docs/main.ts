@@ -115,7 +115,10 @@ class Clip {
     const f = this.follower;
     const who = this.demo.follow === 'queen' ? 'queen' : f && 'id' in f ? f.id : 1;
     const output = w.log.filter(l => l.who === who && !l.tone).slice(-3).map(l => l.text).join('\n');
-    if (output !== this.shownOutput) this.output.textContent = this.shownOutput = output;
+    if (output !== this.shownOutput) {
+      this.shownOutput = output;
+      this.output.replaceChildren(...(output ? output.split('\n') : []).map(text => Object.assign(document.createElement('span'), { textContent: text })));
+    }
   }
 }
 
