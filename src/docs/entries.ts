@@ -103,7 +103,7 @@ export const DOCS: Record<string, DocEntry> = {
   },
   go_home: {
     section: 'Moving',
-    details: 'A shortcut for move_to(hive_pos()). deposit(), eat() and build() only work at the hive, so they usually come right after go_home().',
+    details: 'A shortcut for move_to(hive_pos()). deposit(), eat() and build() only work at the hive, so they usually come right after go_home(). A wasp\'s home is its colony\'s nest instead, once there is one: go_home() takes it there, where it can eat() and deposit() too, and it waits inside, safe from wild wasps.',
     returns: 'True.',
     time: `${MOVE_TICKS} ticks per tile`,
     demo: { forager: 'move_to([7, 4])\ngo_home()\nprint("home again:", at_hive())', view: MEADOW_VIEW },
@@ -119,14 +119,14 @@ export const DOCS: Record<string, DocEntry> = {
   },
   deposit: {
     section: 'Working',
-    details: `Turns everything the bee is carrying into honey in the hive, one honey per nectar. Honey is the colony's only currency: eggs cost ${BEE_COST}, a cell of comb costs ${BUILD_COST}, and bees eat it. Away from the hive deposit() does nothing.`,
+    details: `Turns everything the bee is carrying into honey in the hive, one honey per nectar. Honey is the colony's only currency: eggs cost ${BEE_COST}, a cell of comb costs ${BUILD_COST}, and bees eat it. Away from the hive deposit() does nothing; a wasp can also deposit at its nest.`,
     returns: 'How much honey it made (0 if the bee was not at the hive or carried nothing).',
     time: `${DEPOSIT_TICKS} ticks`,
     demo: { forager: 'move_to([5, 9])\nwhile collect():\n    pass\ngo_home()\nmade = deposit()\nprint("made", made, "honey; the hive has", honey())', view: [0, 3, 8, 8] },
   },
   eat: {
     section: 'Working',
-    details: `Refills energy from the hive's honey. Each honey gives ${ENERGY_PER_HONEY} energy, and a bee only eats whole honey it has room for, so a nearly full bee eats nothing. A bee whose energy reaches 0 starves, so long trips need a plan to come home and eat.`,
+    details: `Refills energy from the hive's honey (a wasp can eat at its nest too). Each honey gives ${ENERGY_PER_HONEY} energy, and a bee only eats whole honey it has room for, so a nearly full bee eats nothing. A bee whose energy reaches 0 starves, so long trips need a plan to come home and eat.`,
     returns: 'How much honey the bee ate.',
     time: `${EAT_TICKS} ticks`,
     demo: { forager: 'print("energy before:", energy())\nate = eat()\nprint("ate", ate, "honey; energy now:", energy())', view: HIVE_VIEW, energy: 30, honey: 10 },
@@ -216,7 +216,7 @@ export const DOCS: Record<string, DocEntry> = {
   },
   at_hive: {
     section: 'What a bee knows',
-    details: 'Whether the bee is on the hive tile, where deposit(), eat() and build() work.',
+    details: 'Whether the bee is on the hive tile, where deposit(), eat() and build() work. For a wasp it is also True at its colony\'s nest, its home.',
     returns: 'True or False.',
     time: instant,
     demo: { forager: 'print("at the hive?", at_hive())\nmove(East)\nprint("at the hive?", at_hive())\ngo_home()\nprint("at the hive?", at_hive())', view: HIVE_VIEW },
@@ -348,7 +348,7 @@ export const DOCS: Record<string, DocEntry> = {
   },
   build_nest: {
     section: 'Raids and wasps',
-    details: `Wasps don't come cheap. First the colony saves up ${NEST_COST} honey, and the queen builds its wasp nest with build_nest(position) on any free tile of your own map (not the hive or a flower); it takes her ${NEST_BUILD_TICKS} ticks. From then on lay("wasp") raises wasps, ${WASP_COST} honey each, and they hatch at the nest. Every wasp runs the editor's wasp.bee tab. Wasps live in the nest, so they need no comb. A colony has one nest. It has ${NEST_HEALTH} health, and enemy wasps can sting it down; then the queen can't lay wasps until you build another, though wasps already hatched live on. nest_pos() says where it is, or None. Wasps grow old and die like bees, so keeping two on guard means laying about five a year: around 150 honey, plus their food. In single player the only threat is the occasional lone wild wasp, so a nest pays off mostly in multiplayer.`,
+    details: `Wasps don't come cheap. First the colony saves up ${NEST_COST} honey, and the queen builds its wasp nest with build_nest(position) on any free tile of your own map (not the hive or a flower); it takes her ${NEST_BUILD_TICKS} ticks. From then on lay("wasp") raises wasps, ${WASP_COST} honey each, and they hatch at the nest. Every wasp runs the editor's wasp.bee tab. Wasps live in the nest, so they need no comb: go_home() takes a wasp there, and it can eat() and deposit() there too. A colony has one nest. It has ${NEST_HEALTH} health, and enemy wasps can sting it down; then the queen can't lay wasps until you build another, though wasps already hatched live on. nest_pos() says where it is, or None. Wasps grow old and die like bees, so keeping two on guard means laying about five a year: around 150 honey, plus their food. In single player the only threat is the occasional lone wild wasp, so a nest pays off mostly in multiplayer.`,
     returns: 'build_nest(): True if she built it; False without the honey, with a nest already, or on a taken tile. nest_pos(): [x, y] or None.',
     time: `${NEST_BUILD_TICKS} ticks`,
     covers: ['nest_pos'],

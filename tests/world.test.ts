@@ -639,6 +639,32 @@ describe('health, raids and wasps', () => {
     expect(printed(world)).toEqual(['True', `wasp ${WASP_HEALTH} ${WASP_CAPACITY}`]);
   });
 
+  it("a wasp's home is its nest: go_home() takes it there, at_hive() is True, and it eats and deposits there", () => {
+    const script = 'move_to([8, 6])\ngo_home()\nprint(get_pos(), at_hive())\nprint(eat(), deposit())\nwhile True:\n    wait(100)';
+    const world = new World(programs('while True:\n    wait(100)', IDLE_QUEEN, script), 1, { bees: 0, wasps: 1, nest: [5, 6] });
+    world.colony.honey = 10;
+    Object.assign(world.colony.bees[0], { energy: 50, carrying: 3 }); // hungry, and carrying stolen honey
+    simulate(world, 200);
+    expect(printed(world)).toEqual(['[5, 6] True', '1 3']);
+    expect(world.colony.honey).toBe(12); // 10, less the 1 it ate, plus the 3 it brought
+    // with no nest yet, a wasp's home is the hive
+    const homeless = simulate(new World(programs('while True:\n    wait(100)', IDLE_QUEEN, 'move_to([8, 6])\ngo_home()\nprint(get_pos() == hive_pos())\nwhile True:\n    wait(100)'), 1, { bees: 0, wasps: 1 }), 200);
+    expect(printed(homeless)).toEqual(['True']);
+  });
+
+  it('a wasp inside its nest is safe from wild wasps, as bees are inside the hive', () => {
+    const run = (script: string) => {
+      const world = new World(programs('while True:\n    wait(100)', IDLE_QUEEN, script), 1, { bees: 0, wasps: 1, nest: [5, 6], nests: [[9, 6]], nestWasps: 3 });
+      simulate(world, 900);
+      return world.colony;
+    };
+    const home = run('go_home()\nwhile True:\n    wait(100)');
+    expect(home.bees).toHaveLength(1);
+    expect(home.bees[0].health).toBe(WASP_HEALTH);
+    const outside = run('move_to([7, 6])\nwhile True:\n    wait(100)'); // two tiles from the wild nest, out in the open
+    expect(outside.bees.length === 0 || outside.bees[0].health < WASP_HEALTH).toBe(true);
+  });
+
   it("wasps can't collect, and a sting that hits nothing misses", () => {
     const wasp = new World(programs('wait(1000)', IDLE_QUEEN, 'collect()'), 1, { bees: 0, wasps: 1 });
     simulate(wasp, 5);
@@ -807,8 +833,8 @@ describe("a colony's wasp nest", () => {
 
   it("an enemy's wasps can sting it down; the queen can't lay wasps until a new one, but wasps live on", () => {
     const world = new World(null, 5, { maps: [5, 5], haltOnError: false });
-    // its wasp waits in the hive: a wasp on the nest tile would take the stings first
-    const home = world.found(programs('while True:\n    wait(100)', 'go_home()\nwhile True:\n    wait(100)'), { x: 0, y: 0 }, 'home');
+    // its wasp waits in the hive, not at home in its nest: a wasp on the nest tile would take the stings first
+    const home = world.found(programs('while True:\n    wait(100)', 'move_to(hive_pos())\nwhile True:\n    wait(100)'), { x: 0, y: 0 }, 'home');
     home.nest = { x: 6, y: 3, health: NEST_HEALTH, maxHealth: NEST_HEALTH };
     world.spawn(home, 'wasp');
     const enemy = world.found(programs(IDLE_QUEEN, 'move_to([7, 3])\nwhile sting([6, 3]):\n    pass\nprint("down")\nwhile True:\n    wait(100)'), { x: 1, y: 0 }, 'enemy');

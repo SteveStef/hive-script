@@ -60,8 +60,12 @@ export function roleColor(roleNames: string[], role: string): string | null {
  */
 export function insideHive(world: ColonyView, bee: Unit & { owner?: string | null }, mine: boolean): boolean {
   if (bee.action?.kind === 'move' && bee.action.moving) return false;
-  if (mine) return world.atHive(bee);
-  return bee.owner != null && world.otherHives.some(h => h.owner === bee.owner && h.x === bee.x && h.y === bee.y);
+  const at = (t: Tile) => t.x === bee.x && t.y === bee.y;
+  // wasps live in their colony's nest, and go inside it as bees go into the hive
+  if (mine) return world.atHive(bee) || (bee.role === 'wasp' && !!world.nest && at(world.nest));
+  if (bee.owner == null) return false;
+  if (world.otherHives.some(h => h.owner === bee.owner && at(h))) return true;
+  return bee.role === 'wasp' && world.nests.some(n => !n.wild && n.owner === bee.owner && at(n));
 }
 
 // A wash of color over the meadow for each season.
@@ -271,7 +275,7 @@ export class Renderer {
       const img = this.hives[n - 1];
       const own = !!world.hive && world.hive.x === h.x && world.hive.y === h.y;
       const home = own
-        ? world.bees.filter(b => insideHive(world, b, true)).length
+        ? world.bees.filter(b => world.atHive(b) && insideHive(world, b, true)).length
         : world.visitors.filter(b => b.x === h.x && b.y === h.y && insideHive(world, b, false)).length;
       return { img, x: h.x * TILE + 8 - (img.width >> 1), y: h.y * TILE + 15 - img.height, w: img.width, h: img.height, line: h.y * TILE + 8, shielded: h.shielded, home };
     });
@@ -298,6 +302,12 @@ export class Renderer {
         const y = n.y * TILE + 15 - sprite.height;
         g.drawImage(sprite, x, y);
         if (n.health < n.maxHealth) this.drawHealth(n.x * TILE + 8, y - 3, n.health, n.maxHealth);
+        // how many wasps are inside a colony's nest
+        const own = !n.wild && !!world.nest && world.nest.x === n.x && world.nest.y === n.y;
+        const home = n.wild ? 0 : own
+          ? world.bees.filter(b => b.x === n.x && b.y === n.y && insideHive(world, b, true)).length
+          : world.visitors.filter(b => b.x === n.x && b.y === n.y && insideHive(world, b, false)).length;
+        if (home) this.drawText(String(home), n.x * TILE + 8, y - (n.health < n.maxHealth ? 10 : 7));
       } })),
     ].sort((a, b) => a.y - b.y);
     for (const layer of layers) layer.draw();

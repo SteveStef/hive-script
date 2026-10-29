@@ -145,7 +145,9 @@ export function beeGlobals(colony: Colony, bee: Bee): Record<string, Value> {
     }),
     go_home: builtin('go_home', (args, line) => {
       expectArgs('go_home', args, 0, line);
-      return act('move_to', [colony.hive.x, colony.hive.y]);
+      // a wasp's home is its colony's nest, once there is one
+      const home = bee.role === 'wasp' && colony.nest ? colony.nest : colony.hive;
+      return act('move_to', [home.x, home.y]);
     }),
     collect: beeWork('collect', 'collect nectar'),
     deposit: action('deposit'),
@@ -190,7 +192,7 @@ export function beeGlobals(colony: Colony, bee: Bee): Record<string, Value> {
     hive_pos: builtin('hive_pos', () => [colony.hive.x, colony.hive.y]),
     nectar: builtin('nectar', () => bee.carrying),
     capacity: builtin('capacity', () => bee.capacity),
-    at_hive: builtin('at_hive', () => colony.atHive(bee)),
+    at_hive: builtin('at_hive', () => colony.atHome(bee)),
     energy: builtin('energy', () => Math.floor(bee.energy)),
     max_energy: builtin('max_energy', () => MAX_ENERGY),
     health: builtin('health', () => bee.health),

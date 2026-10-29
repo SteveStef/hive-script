@@ -495,6 +495,10 @@ export class Colony {
   atHive(tile: Tile): boolean {
     return tile.x === this.hive.x && tile.y === this.hive.y;
   }
+  /** Where a unit can eat and deposit: the hive, and for a wasp its colony's nest too. */
+  atHome(unit: Bee): boolean {
+    return this.atHive(unit) || (unit.role === 'wasp' && !!this.nest && unit.x === this.nest.x && unit.y === this.nest.y);
+  }
 
   flowerAt(x: number, y: number): Flower | null {
     return this.world.flowerAt(x, y);
@@ -1382,7 +1386,7 @@ export class World {
         break;
       }
       case 'deposit': {
-        const amount = colony.atHive(bee) ? bee.carrying : 0;
+        const amount = colony.atHome(bee) ? bee.carrying : 0;
         if (amount) {
           colony.honey += amount;
           colony.totalHoney += amount;
@@ -1398,7 +1402,7 @@ export class World {
         // A hurt bee eats until it's healed, too.
         const forEnergy = Math.round((MAX_ENERGY - bee.energy) / ENERGY_PER_HONEY);
         const forHealth = Math.ceil((bee.maxHealth - bee.health) / HEALTH_PER_HONEY);
-        const eaten = colony.atHive(bee) ? Math.min(Math.max(forEnergy, forHealth), colony.honey) : 0;
+        const eaten = colony.atHome(bee) ? Math.min(Math.max(forEnergy, forHealth), colony.honey) : 0;
         colony.honey -= eaten;
         bee.energy = Math.min(MAX_ENERGY, bee.energy + eaten * ENERGY_PER_HONEY);
         bee.health = Math.min(bee.maxHealth, bee.health + eaten * HEALTH_PER_HONEY);
@@ -1678,7 +1682,7 @@ export class World {
     const nestMap = this.mapAt(nest);
     const huntable = (b: Bee, c: Colony) => {
       const m = this.mapAt(b);
-      return !c.shielded && m.x === nestMap.x && m.y === nestMap.y && !this.isHive(b);
+      return !c.shielded && m.x === nestMap.x && m.y === nestMap.y && !this.isHive(b) && !c.atHome(b); // never into a hive or nest
     };
     const chased = nest.chase?.[w.id];
     for (const c of chased === undefined ? [] : this.colonies) {
