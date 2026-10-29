@@ -684,7 +684,7 @@ export class World {
   ) {
     this.rng = mulberry32(seed);
     this.haltOnError = options.haltOnError ?? true;
-    this.persistent = options.maps !== undefined;
+    this.persistent = options.maps !== undefined && !options.home; // a server's world runs on with no colonies; single player's ends with its colony
     this.maps = options.maps ?? [1, 1];
     this.width = this.maps[0] * COLS;
     this.height = this.maps[1] * ROWS;

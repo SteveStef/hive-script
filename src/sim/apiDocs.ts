@@ -119,7 +119,7 @@ export const API_DOCS: ApiDoc[] = [
     doc: `Build the colony's wasp nest on a free tile of your own map, for ${NEST_COST} honey (${NEST_BUILD_TICKS} ticks). Then lay("wasp") raises wasps, which hatch there. One nest per colony; returns False if it couldn't.` },
   { name: 'nest_pos', signature: 'nest_pos()', insert: 'nest_pos()', doc: "Your colony's wasp nest as [x, y], or None if it has none." },
   { name: 'my_map', signature: 'my_map()', insert: 'my_map()',
-    doc: "Which map the colony's hive is on, as [column, row]. A map is 20 tiles across and 12 down; single player is the one map [0, 0]." },
+    doc: "Which map the colony's hive is on, as [column, row]. A map is 20 tiles across and 12 down; single player's colony is on [0, 0], with a wild wasp nest's map [1, 0] next door." },
   { name: 'map_at', signature: 'map_at(position)', insert: 'map_at(${1:get_pos()})',
     doc: 'Which map a position is on, as [column, row]. In multiplayer, maps sit side by side in one big grid of positions.' },
   { name: 'int', signature: 'int(value)', insert: 'int(${1})', doc: 'The value as a whole number.' },

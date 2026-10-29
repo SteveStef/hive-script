@@ -1350,3 +1350,26 @@ describe('custom builds: lay(type="wasp", energy=300, damage=8)', () => {
     expect(back.colony.bees.map(b => [b.role, b.maxEnergy, b.damage])).toEqual([['forager', MAX_ENERGY, BEE_STING_DAMAGE], ['wasp', MAX_ENERGY, STING_DAMAGE]]);
   });
 });
+
+describe("single player's two maps: home, and a wild nest next door", () => {
+  const SINGLE = { maps: [2, 1] as [number, number], hedges: true, home: true, nests: [[COLS + 12, 5]] as [number, number][] };
+
+  it('puts the colony on map [0, 0] and the nest, with its wasps, on [1, 0], behind a hedge with a gate', () => {
+    const world = new World({ forager: parse(SURVIVOR_FORAGER), queen: parse(SURVIVOR_QUEEN), shared: SHARED }, 3, { ...SINGLE, ...NEW_COLONY });
+    expect(world.colony.map).toEqual({ x: 0, y: 0 });
+    expect(world.nests.map(n => [Math.floor(n.x / COLS), n.wasps.length])).toEqual([[1, NEST_WASPS]]);
+    expect(world.hiveProblem({ x: 0, y: 0 }, { x: 0, y: 6 })).not.toBeNull(); // the map's edge is hedge now
+    // a year on: the wild wasps never set foot on the colony's map
+    for (let i = 0; i < year; i++) {
+      world.step();
+      for (const w of world.nests.flatMap(n => n.wasps)) expect(w.x).toBeGreaterThanOrEqual(COLS);
+    }
+    expect(world.colony.over).toBeNull();
+  });
+
+  it('still ends when the colony dies out', () => {
+    const world = simulate(new World({ forager: parse(IDLE_QUEEN), queen: parse(IDLE_QUEEN), shared: SHARED }, 1, { ...SINGLE, bees: 0 }), year);
+    expect(world.colony.over).not.toBeNull();
+    expect(world.running).toBe(false);
+  });
+});

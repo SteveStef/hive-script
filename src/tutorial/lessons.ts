@@ -361,7 +361,7 @@ export const LESSONS: Lesson[] = [
       <p>Wasps have 30 health (bees 10), can't collect, and ${fn('sting', 'position')} an enemy on the tile right next to them for 5 damage. ${fn('enemies_near')} lists enemies in sight.
       A raider has to land on your hive for 10 ticks to steal: a wasp standing beside the hive has time to sting twice.
       Worker bees can ${fn('sting', 'position')} too, but only once: it does 10 damage, and the bee dies doing it.
-      While a raider sits on your hive, a red banner over the meadow says so. In single player there are no raiders, but now and then a lone wild wasp visits for a season and hunts bees in the open. Wasps grow old like bees, so in a real game the queen keeps replacing them.</p>
+      While a raider sits on your hive, a red banner over the meadow says so. In single player there are no raiders, but a wild wasp nest hangs on the map next door (its wasps never leave that map), and now and then a lone wild wasp visits for a season and hunts bees in the open. Wasps grow old like bees, so in a real game the queen keeps replacing them.</p>
       <p>Later, the queen can lay stronger units by naming stats: ${code('lay(type="wasp", damage=8)')} hatches a wasp with an 8-damage sting, for ${eggCost('wasp', { damage: 8 })} honey instead of 30.
       Energy, damage, health and a bee's capacity can each go up to ten times the default, and the price climbs fast; ${fn('egg_cost', '...')} tells the queen a build's price before she lays, and clicking a unit shows its build.</p>
       <p><b>Do this:</b> you've saved 200 honey. Build a nest, lay a wasp, and make wasp.bee guard the hive until it stings a raider to death.</p>`,

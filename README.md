@@ -172,8 +172,9 @@ scripts/
 ```
 
 The server runs the same `src/sim` and `src/lang` code as the browser. A `World` is the land
-and the clock; each `Colony` on it is one player's hive. Single player is a world of one map
-with one colony (`world.colony`), and multiplayer is a world of 5×5 maps where colonies are
+and the clock; each `Colony` on it is one player's hive. Single player is a world of two maps:
+the colony's (`world.colony`), and next door through the hedge's gate one with a wild wasp nest
+(`SINGLE` in `src/main.ts`); multiplayer is a world of 5×5 maps where colonies are
 `found()`ed and `remove()`d. `ColonyView` (`src/sim/view.ts`) is the read-only shape the
 renderer and cards draw from: one map of the world, plus the player's own colony. In single
 player that is the local `Colony`; in multiplayer it is a `RemoteColony` rebuilt from the

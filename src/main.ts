@@ -10,7 +10,7 @@ import { insideHive, Renderer, roleColor } from './render/renderer';
 import { TILE } from './render/scenery';
 import { parseScripts, type ScriptProblem, type ScriptSet } from './sim/scripts';
 import { RemoteColony, type BeeView, type ColonyJson, type ColonyView } from './sim/view';
-import { COLS, HIVE_SPOT, hiveProblem, locate, MAX_ENERGY, MAX_ROLES, NEW_COLONY, RESERVED_NAMES, ROLE_NAME, ROWS, SEASON_TICKS, tileKey, World, type LogLine, type ScriptFile, type Tile } from './sim/world';
+import { COLS, HIVE_SPOT, hiveProblem, locate, MAX_ENERGY, MAX_ROLES, NEST_SPOT, NEW_COLONY, RESERVED_NAMES, ROLE_NAME, ROWS, SEASON_TICKS, tileKey, World, type LogLine, type ScriptFile, type Tile, type WorldOptions } from './sim/world';
 import { beeCard, beeStatus, queenCard, queenStatus } from './ui/beeCard';
 import { confirmDialog, promptDialog } from './ui/dialog';
 import { createEditor } from './ui/editor';
@@ -75,7 +75,9 @@ let roles: string[] = [];
 const files = (): ScriptFile[] =>
   ['forager', ...roles, 'wasp', 'shared', 'queen'].filter(f => !lesson || lesson.tabs.includes(f) || roles.includes(f));
 
-// single player: a world that runs here
+// single player: a world that runs here, two maps side by side: the colony's, and next door
+// (through the hedge's gate) one with a wild wasp nest
+const SINGLE: WorldOptions = { maps: [2, 1], hedges: true, home: true, nests: [[COLS + NEST_SPOT.x, NEST_SPOT.y]] };
 let seed = newSeed();
 let local = new World(null, seed);
 // placing a hive: the map it goes on, from single player's new meadow until Run, or from picking
@@ -172,7 +174,7 @@ function setMode(next: PlayMode): void {
   $('single-controls').hidden = mode === 'multi';
   $('lessons').hidden = mode !== 'tutorial';
   $('multi-controls').hidden = mode !== 'multi';
-  mapBar.hidden = mode !== 'multi';
+  mapBar.hidden = mode === 'tutorial'; // single player has a map next door too; a lesson shows the arrows only if its world has more than one map
   $('world-map').hidden = mode !== 'multi';
   for (const tab of document.querySelectorAll<HTMLElement>('.console-tab[data-pane]:not([data-pane="log"])')) tab.hidden = mode !== 'multi';
   lessonSwitch.hidden = mode !== 'tutorial';
@@ -266,8 +268,8 @@ function showProblem(problem: ScriptProblem): void {
 /** Single player's next meadow, paused, with the hive at the last spot used, or the nearest one it fits; clicking moves it. */
 function preview(): void {
   const map = { x: 0, y: 0 };
-  meadow = new World(null, seed);
-  local = new World(null, seed, { hive: meadow.nearestHiveSpot(map, lastSpot ?? HIVE_SPOT) });
+  meadow = new World(null, seed, SINGLE);
+  local = new World(null, seed, { ...SINGLE, hive: meadow.nearestHiveSpot(map, lastSpot ?? HIVE_SPOT) });
   placing = map;
   note('A new meadow. Click where your hive should go (not on flowers), then press Run.', 'note');
 }
@@ -305,7 +307,7 @@ function placeHive(tile: Tile): void {
   } catch {
     // remembering the spot is only a convenience
   }
-  local = new World(null, seed, { hive: tile });
+  local = new World(null, seed, { ...SINGLE, hive: tile });
 }
 
 /** Parses every script and starts a fresh colony running them; Restart first shows the next meadow to place the hive on. */
@@ -327,7 +329,7 @@ function start(): void {
     met = lesson.goals.map(() => false);
     panel.goals(met);
   } else {
-    local = new World(parsed.programs, seed, { hive: local.colony.hive, ...NEW_COLONY, visitors: true }); // no bees yet: the queen lays the first; now and then a wild wasp visits
+    local = new World(parsed.programs, seed, { ...SINGLE, hive: local.colony.hive, ...NEW_COLONY, visitors: true }); // no bees yet: the queen lays the first; now and then a wild wasp visits
     placing = null;
     local.colony.say(null, `Meadow #${seed}: flowers bloom in new places every season, and every game is a new meadow.`, 'note');
     seed = newSeed(); // the next Run or Restart grows a different meadow
@@ -600,11 +602,11 @@ function showAway(since: string | null, events: { tick: number; tone: LogLine['t
   note('Now, live:', 'season');
 }
 
-/** Watches another map of the world; the server sends it from the next message on (in the tutorial, the local world shows it). */
+/** Watches another map of the world; the server sends it from the next message on (in single player and the tutorial, the local world shows it). */
 function watch(map: Tile): void {
-  const size = mode === 'tutorial' ? local.maps : (overview?.size ?? [5, 5]);
+  const size = mode !== 'multi' ? local.maps : (overview?.size ?? [5, 5]);
   if (map.x < 0 || map.y < 0 || map.x >= size[0] || map.y >= size[1]) return;
-  if (mode === 'tutorial') local.colony.viewMap = map;
+  if (mode !== 'multi') local.colony.viewMap = map;
   else socket?.send(JSON.stringify({ type: 'watch', map }));
 }
 
@@ -909,7 +911,8 @@ function mapText(w: ColonyView): string {
   const yours = w.hive ? ` · ${w.bees.filter(here).length} of your bees here` : '';
   const others = strangers ? ` · ${bees(strangers)} from other colonies` : '';
   const theirs = w.otherHives[0]?.shielded ? ' (protected new colony)' : '';
-  return `Map [${m.x}, ${m.y}] · ${w.otherHives.length ? `${holder ?? 'someone'}'s colony${theirs}` : 'a free meadow'}${others}${yours}`;
+  const wild = w.nests.some(n => n.wild && here(n));
+  return `Map [${m.x}, ${m.y}] · ${w.otherHives.length ? `${holder ?? 'someone'}'s colony${theirs}` : wild ? 'a wild wasp nest' : 'a free meadow'}${others}${yours}`;
 }
 
 /** Real time until a moment, as "23h 41m" (or "12m"). */
