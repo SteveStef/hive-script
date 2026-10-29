@@ -610,6 +610,9 @@ function watch(map: Tile): void {
   else socket?.send(JSON.stringify({ type: 'watch', map }));
 }
 
+const STEPS = { west: [-1, 0], east: [1, 0], north: [0, -1], south: [0, 1] } as const;
+const mapArrows = [...mapBar.querySelectorAll<HTMLButtonElement>('[data-go]')];
+
 /** The map on screen, as [column, row]. */
 const watchedMap = (w: ColonyView): Tile => ({ x: Math.floor(w.origin.x / COLS), y: Math.floor(w.origin.y / ROWS) });
 
@@ -1285,6 +1288,14 @@ function updateHud(w: ColonyView): void {
   if (!mapBar.hidden) {
     const text = mapText(w);
     if (mapLabel.textContent !== text) mapLabel.textContent = text;
+    // only the arrows that lead to a map: single player's home shows just east, and its neighbor just west
+    const m = watchedMap(w);
+    const size = mode !== 'multi' ? local.maps : (overview?.size ?? [5, 5]);
+    for (const arrow of mapArrows) {
+      const [dx, dy] = STEPS[arrow.dataset.go as keyof typeof STEPS];
+      const off = m.x + dx < 0 || m.y + dy < 0 || m.x + dx >= size[0] || m.y + dy >= size[1];
+      if (arrow.hidden !== off) arrow.hidden = off;
+    }
   }
   hud.seasonLeft.textContent = mode !== 'multi' ? `${clock(w.seasonLeft, 1000 / TICKS_PER_SECOND)} left at 1×` : `${clock(w.seasonLeft, tickMs)} left`;
 
