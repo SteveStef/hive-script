@@ -398,6 +398,14 @@ describe('seasons', () => {
 });
 
 describe('scent', () => {
+  it('unmark() takes one scent off the tile the bee is on, and says whether there was one', () => {
+    const world = simulate(makeWorld('move(East)\nmark("food")\nmark("danger")\nprint(unmark("food"), unmark("food"), smell("food"))\nwhile True:\n    wait(100)'), MOVE_TICKS + 4 * MARK_TICKS + 4);
+    const { x, y } = { x: world.colony.hive.x + 1, y: world.colony.hive.y };
+    expect(printed(world)).toEqual(['True False None']); // the second unmark found nothing to remove
+    expect(world.colony.scentAt(x, y, 'food')).toBe(0);
+    expect(world.colony.scentAt(x, y, 'danger')).toBeGreaterThan(0); // the other scent stays
+  });
+
   it('mark() scents the tile the bee is on, and it fades evenly to nothing', () => {
     const world = simulate(makeWorld('move(East)\nmark("food")'), MOVE_TICKS + MARK_TICKS + 2);
     const { x, y } = { x: world.colony.hive.x + 1, y: world.colony.hive.y };

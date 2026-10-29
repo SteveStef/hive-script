@@ -200,6 +200,10 @@ export function beeGlobals(colony: Colony, bee: Bee): Record<string, Value> {
       expectArgs('mark', args, 1, line);
       return act('mark', [scentName('mark', args[0], line)]);
     }),
+    unmark: builtin('unmark', (args, line) => {
+      expectArgs('unmark', args, 1, line);
+      return act('unmark', [scentName('unmark', args[0], line)]);
+    }),
 
     // senses about this bee: these answer instantly
     gates: builtin('gates', (args, line) => {
@@ -262,7 +266,7 @@ export function beeGlobals(colony: Colony, bee: Bee): Record<string, Value> {
 }
 
 // Worker actions the queen might reach for; each gets a clear explanation instead of "not defined".
-const WORKER_ONLY = ['move', 'move_to', 'go_home', 'collect', 'deposit', 'eat', 'build', 'mark', 'die', 'role', 'steal', 'sting', 'health', 'max_health', 'damage', 'enemies_near', 'flowers_near', 'nectar_at'];
+const WORKER_ONLY = ['move', 'move_to', 'go_home', 'collect', 'deposit', 'eat', 'build', 'mark', 'unmark', 'die', 'role', 'steal', 'sting', 'health', 'max_health', 'damage', 'enemies_near', 'flowers_near', 'nectar_at'];
 
 /** Everything the queen's script (queen.bee) can see. */
 export function queenGlobals(colony: Colony): Record<string, Value> {

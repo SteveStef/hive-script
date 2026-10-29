@@ -250,9 +250,10 @@ export const DOCS: Record<string, DocEntry> = {
   // ---- scent ----
   mark: {
     section: 'Scent',
-    details: `Leaves a scent on the tile the bee is on, the way real bees mark flowers and the hive entrance. Give it any name you like, such as "food", "empty" or "danger"; a tile can hold several different scents. A fresh mark has strength ${SCENT_MAX} and fades evenly to nothing over ${SCENT_LIFE} ticks, and marking the same tile again makes it fresh. Every bee can smell every mark, so scent is how bees share what they have found. Marks show on the meadow as a colored outline, one color per name; hover a tile to read them.`,
-    returns: 'True.',
+    details: `Leaves a scent on the tile the bee is on, the way real bees mark flowers and the hive entrance. Give it any name you like, such as "food", "empty" or "danger"; a tile can hold several different scents. A fresh mark has strength ${SCENT_MAX} and fades evenly to nothing over ${SCENT_LIFE} ticks, and marking the same tile again makes it fresh. Every bee can smell every mark, so scent is how bees share what they have found. Marks show on the meadow as a colored outline, one color per name; hover a tile to read them. unmark(name) takes your colony's scent of that name off the tile again, so a bee that finds a marked flower empty can stop it drawing others there.`,
+    returns: 'mark(): True. unmark(): True if there was a mark to remove, False if not.',
     time: `${MARK_TICKS} ticks`,
+    covers: ['unmark'],
     demo: { forager: 'move_to([3, 4])\nfor i in range(5):\n    mark("trail")\n    move(East)\nprint("left a trail of scent")', view: MEADOW_VIEW },
   },
   smell: {

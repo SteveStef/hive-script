@@ -23,6 +23,7 @@ export function beeStatus(bee: BeeView): { label: string; tone: StatusTone } {
     case 'deposit': return { label: 'Depositing', tone };
     case 'eat': return { label: 'Eating', tone };
     case 'mark': return { label: 'Marking', tone };
+    case 'unmark': return { label: 'Unmarking', tone };
     case 'sting': return { label: 'Stinging', tone };
     case 'steal': return { label: 'Raiding', tone };
     case 'bump': return { label: 'Bumped the edge', tone };

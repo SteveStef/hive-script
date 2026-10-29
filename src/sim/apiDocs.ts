@@ -62,6 +62,8 @@ export const API_DOCS: ApiDoc[] = [
   // scent
   { name: 'mark', signature: 'mark(name)', insert: 'mark("${1:food}")', only: 'worker',
     doc: `Leave a scent called name, like "food" or "danger", on the tile you are on (${MARK_TICKS} ticks). It fades away over ${SCENT_LIFE} ticks; marking again makes it fresh.` },
+  { name: 'unmark', signature: 'unmark(name)', insert: 'unmark("${1:food}")', only: 'worker',
+    doc: `Remove your colony's scent called name from the tile you are on (${MARK_TICKS} ticks), like a "food" mark on a flower that ran dry. Returns True if there was one.` },
   { name: 'smell', signature: 'smell(name)', insert: 'smell("${1:food}")', only: 'worker',
     doc: `Position of the tile within ${SMELL_RANGE} tiles where that scent is strongest, or None if you can't smell it. Scent carries ${SMELL_RANGE / SENSE_RANGE} times as far as a bee can see.` },
   { name: 'smell_here', signature: 'smell_here(name)', insert: 'smell_here("${1:food}")', only: 'worker',

@@ -204,7 +204,7 @@ export type Action =
   // moving: false while waiting for the next tile to be free; waited: blocked ticks so far; single: from move(), which never steers
   | { kind: 'move'; path: Tile[]; target: Tile; stepLeft: number; moving: boolean; waited: number; single: boolean; hop?: number } // hop: ticks per tile, if not MOVE_TICKS
   | { kind: 'collect' | 'deposit' | 'eat' | 'build' | 'wait' | 'bump' | 'steal'; left: number }
-  | { kind: 'mark'; left: number; scent: string }
+  | { kind: 'mark' | 'unmark'; left: number; scent: string }
   | { kind: 'sting'; left: number; target: Tile };
 type MoveAction = Extract<Action, { kind: 'move' }>;
 
@@ -1277,7 +1277,8 @@ export class World {
       case 'deposit': return ENERGY_PER_WORK / DEPOSIT_TICKS;
       case 'eat': return ENERGY_PER_WORK / EAT_TICKS;
       case 'build': return (ENERGY_PER_WORK * 4) / BUILD_TICKS;
-      case 'mark': return ENERGY_PER_WORK / MARK_TICKS;
+      case 'mark':
+      case 'unmark': return ENERGY_PER_WORK / MARK_TICKS;
       case 'sting': return ENERGY_PER_WORK / STING_TICKS;
       case 'steal': return ENERGY_PER_WORK / STEAL_TICKS;
       default: return winter ? WINTER_IDLE : ENERGY_IDLE;
@@ -1351,7 +1352,8 @@ export class World {
         bee.action = { kind: 'build', left: BUILD_TICKS };
         return;
       case 'mark':
-        bee.action = { kind: 'mark', left: MARK_TICKS, scent: args[0] as string };
+      case 'unmark':
+        bee.action = { kind: action, left: MARK_TICKS, scent: args[0] as string };
         return;
       case 'die':
         this.die(colony, bee, 'by choice');
@@ -1472,6 +1474,9 @@ export class World {
       case 'mark':
         markScent(colony, bee, a.scent, this.tick);
         bee.runner.resume(true);
+        break;
+      case 'unmark':
+        bee.runner.resume(unmarkScent(colony, bee, a.scent));
         break;
       case 'sting': {
         const hit = this.strike(bee, colony, a.target);
@@ -2013,6 +2018,15 @@ function markScent(colony: Colony, at: Tile, scent: string, tick: number): void 
   const key = tileKey(at.x, at.y);
   if (!colony.scents.has(key)) colony.scents.set(key, new Map());
   colony.scents.get(key)!.set(scent, tick);
+}
+
+/** Takes a colony's scent of that name off a tile; true if there was one. */
+function unmarkScent(colony: Colony, at: Tile, scent: string): boolean {
+  const key = tileKey(at.x, at.y);
+  const marks = colony.scents.get(key);
+  if (!marks?.delete(scent)) return false;
+  if (!marks.size) colony.scents.delete(key);
+  return true;
 }
 
 /** The queen's runner: shared.bee first, so its constants and functions exist for her too, then queen.bee. */
