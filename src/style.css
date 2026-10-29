@@ -298,6 +298,7 @@ body.focus-code .layout, body.focus-game .layout { grid-template-columns: minmax
 .facts dt, .vars dt { color: #6b4a22; }
 .facts dd, .vars dd { margin: 0; font-weight: 600; font-variant-numeric: tabular-nums; }
 .facts dd { white-space: nowrap; }
+.facts .raised { background: var(--honey); color: var(--honey-ink); padding: 0 4px; border-radius: 2px; } /* a stat the queen laid above its default */
 .vars dd { overflow-wrap: anywhere; }
 .muted { margin: 0; color: #6b4a22; }
 

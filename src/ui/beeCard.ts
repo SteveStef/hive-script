@@ -1,6 +1,6 @@
 import { format } from '../lang/interpreter';
 import type { BeeView, ColonyView, QueenView, RunnerView } from '../sim/view';
-import { BEE_COST, ENERGY_PER_TILE, locate, MAX_ENERGY, NEST_COST, WASP_COST, type ScriptFile } from '../sim/world';
+import { BEE_COST, ENERGY_PER_TILE, locate, MAX_ENERGY, NEST_COST, statDefault, STATS, WASP_COST, type ScriptFile, type Stat } from '../sim/world';
 
 const HUNGRY = 25;
 const LONG_VALUE = 48;
@@ -43,6 +43,13 @@ export function beeCard(bee: BeeView, sourceLines: Record<ScriptFile, string[]>,
   const energyTone = bee.energy < HUNGRY ? 'low' : bee.energy < 50 ? 'mid' : 'good';
   const wasp = bee.role === 'wasp';
   const healthTone = bee.health <= bee.maxHealth / 4 ? 'low' : bee.health <= bee.maxHealth / 2 ? 'mid' : 'good';
+  const tank = bee.maxEnergy ?? MAX_ENERGY;
+  // its build: each stat beside its role's default, the raised ones in bold
+  const statOf: Record<Stat, number> = { energy: tank, capacity: bee.capacity, damage: bee.damage ?? statDefault(bee.role, 'damage'), health: bee.maxHealth };
+  const build = STATS.map(s => {
+    const d = statDefault(bee.role, s);
+    return `<dt>${s === 'health' ? 'Max health' : s[0].toUpperCase() + s.slice(1)}</dt><dd>${statOf[s] > d ? `<span class="raised">${statOf[s]}</span> (default ${d})` : `${statOf[s]} (default)`}</dd>`;
+  }).join('');
 
   const at = locate(bee.role, bee.runner.line);
   const where = alive
@@ -57,13 +64,15 @@ export function beeCard(bee: BeeView, sourceLines: Record<ScriptFile, string[]>,
       <span>${bee.carrying} of ${bee.capacity}</span>
       <span class="k">Health</span>${bar(bee.health, bee.maxHealth, healthTone)}
       <span>${alive ? `${bee.health} of ${bee.maxHealth}${bee.health < bee.maxHealth ? ' · eat() at the hive to heal' : ''}` : '0'}</span>
-      <span class="k">Energy</span>${bar(bee.energy, MAX_ENERGY, energyTone)}
-      <span>${n(bee.energy)} of ${MAX_ENERGY}${alive ? ` · enough for ${n(bee.energy / ENERGY_PER_TILE)} tiles` : ''}</span>
+      <span class="k">Energy</span>${bar(bee.energy, tank, energyTone)}
+      <span>${n(bee.energy)} of ${tank}${alive ? ` · enough for ${n(bee.energy / ENERGY_PER_TILE)} tiles` : ''}</span>
       <span class="k">Age</span>${bar(bee.age, bee.lifespan, lifeLeft < 600 && alive ? 'low' : 'life')}
       <span>${alive
         ? `${n(bee.age)} of ${n(bee.lifespan)} ticks · old age in ${n(lifeLeft)} (about ${clock(lifeLeft)} at 1×)`
         : `lived ${n(bee.age)} ticks`}</span>
     </div>
+    <div class="vars-head">Build</div>
+    <dl class="facts">${build}</dl>
     <dl class="facts">
       <dt>Position</dt><dd>[${bee.x}, ${bee.y}]</dd>
       <dt>Hatched</dt><dd>tick ${n(bee.bornAt)}</dd>
@@ -105,7 +114,7 @@ export function queenCard(world: ColonyView, sourceLines: Record<ScriptFile, str
     <dl class="facts">
       <dt>Eggs laid</dt><dd>${queen.laid}</dd>
       <dt>Next hatch</dt><dd>${next ? `in ${next.hatchAt - world.tick} ticks` : 'no eggs'}</dd>
-      <dt>Egg cost</dt><dd>${BEE_COST} honey; a wasp ${WASP_COST}, once there's a nest</dd>
+      <dt>Egg cost</dt><dd>${BEE_COST} honey; a wasp ${WASP_COST}, once there's a nest; more for a custom build (see egg_cost())</dd>
       <dt>Wasp nest</dt><dd>${world.nest ? `at [${world.nest.x}, ${world.nest.y}] · health ${world.nest.health} of ${world.nest.maxHealth}` : `none yet (build_nest costs ${NEST_COST} honey)`}</dd>
       <dt>Free comb</dt><dd>${world.space}</dd>
     </dl>

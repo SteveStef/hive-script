@@ -112,6 +112,14 @@ A colony runs a script per role, each in its own editor tab:
 - **Custom roles**: **+ Role** adds up to 5 more (builder.bee, nurse.bee...). A role is
   just a script; bees hatch into the role the queen names with `lay("builder")` and keep it
   for life. `role()`, `roles()` and `role_count()` let scripts ask about them.
+- **Custom builds**: the queen can lay any role stronger by naming stats,
+  `lay(type="wasp", energy=300, damage=8)`. Energy, capacity, damage and health each go
+  from the role's default up to `BUILD_MAX` (10) times it, for extra honey per egg of
+  `BUILD_PRICE[stat] * (value / default - 1)²` (`eggCost()` in `world.ts`; scripts ask with
+  `egg_cost(...)`). The prices were tuned with strategy races: a little extra capacity or
+  energy pays for itself, doubling capacity doesn't, and health and damage cost the most.
+  Units look the same on the meadow; the bee card lists a unit's build. The language has
+  Python's keyword arguments (`name=value`) for built-ins and players' own functions.
 - **shared.bee**: functions and constants every script can use, the queen's too. It runs ahead of each script
   in the same `Runner`, with its lines numbered from `SHARED_LINE_BASE` so errors and the
   line highlight can tell the files apart (`locate()` in `world.ts`). The queen gets read-only

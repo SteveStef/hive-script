@@ -245,8 +245,7 @@ class Parser {
     for (;;) {
       if (this.at('op', '(')) {
         const line = this.next().line;
-        const args = this.items(')', 'Missing ")" to close this call.');
-        e = { kind: 'call', callee: e, args, line };
+        e = { kind: 'call', callee: e, ...this.callArgs(), line };
       } else if (this.at('op', '[')) {
         const line = this.next().line;
         const index = this.expr();
@@ -291,6 +290,27 @@ class Parser {
   }
 
   /** Comma-separated expressions up to and including the closing bracket. */
+  /** A call's arguments: plain values first, then any named ones (name=value), as in Python. */
+  private callArgs(): { args: Expr[]; named: { name: string; value: Expr }[] } {
+    const args: Expr[] = [];
+    const named: { name: string; value: Expr }[] = [];
+    while (!this.at('op', ')')) {
+      const following = this.tokens[this.pos + 1];
+      if (this.at('name') && following.kind === 'op' && following.value === '=') {
+        const t = this.next();
+        this.next();
+        if (named.some(n => n.name === t.value)) throw new ScriptError(`"${t.value}" is given twice in this call.`, t.line);
+        named.push({ name: t.value, value: this.expr() });
+      } else {
+        if (named.length) throw new ScriptError('Plain values go before named ones (like energy=300) in a call.', this.tok.line);
+        args.push(this.expr());
+      }
+      if (!this.accept('op', ',')) break;
+    }
+    this.expect('op', ')', 'Missing ")" to close this call.');
+    return { args, named };
+  }
+
   private items(close: string, message: string): Expr[] {
     const items: Expr[] = [];
     while (!this.at('op', close)) {

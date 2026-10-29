@@ -2,6 +2,7 @@ import {
   BEE_CAPACITY, BEE_HEALTH, BEE_STING_DAMAGE, HEALTH_PER_HONEY, NEST_BUILD_TICKS, NEST_COST, NEST_HEALTH, STEAL_TICKS, STING_DAMAGE, STING_TICKS, WASP_CAPACITY, WASP_COST, WASP_HEALTH,
   BEE_COST, BUILD_COST, BUILD_TICKS, COLLECT_TICKS, DEPOSIT_TICKS, EAT_TICKS, ENERGY_PER_HONEY, HATCH_TICKS, LAY_TICKS,
   BLOOMS, MARK_TICKS, MOVE_TICKS, SCENT_LIFE, SCENT_MAX, SEASON_TICKS, SENSE_RANGE, SHARED_LINE_BASE, SMELL_RANGE, VISITOR_KILLS, WILD_SIGHT, WINTER_IDLE,
+  BUILD_MAX, eggCost, MAX_ENERGY,
   type Programs, type WorldOptions,
 } from '../sim/world';
 import { parse } from '../lang/parser';
@@ -270,9 +271,21 @@ export const DOCS: Record<string, DocEntry> = {
   },
 
   // ---- the queen ----
+  egg_cost: {
+    section: 'The queen',
+    details: `The honey an egg would cost, with exactly the arguments lay() takes: egg_cost() for a forager (${BEE_COST}), egg_cost("wasp") (${WASP_COST}), or a custom build like egg_cost(type="wasp", energy=${3 * MAX_ENERGY}) (${eggCost('wasp', { energy: 3 * MAX_ENERGY })}). A queen can check it against honey() before she commits, so a big build doesn't eat the honey the colony needs for winter. Workers can call it too.`,
+    returns: 'A whole number of honey.',
+    time: instant,
+    demo: {
+      queen: 'print("forager:", egg_cost())\nprint("wasp:", egg_cost("wasp"))\nprint("long-range wasp:", egg_cost(type="wasp", energy=300))\nprint("hauler:", egg_cost(capacity=6))',
+      view: HIVE_VIEW, follow: 'queen', honey: 20, length: 120,
+    },
+  },
   lay: {
     section: 'The queen',
-    details: `Only the queen can lay, from queen.bee. An egg costs ${BEE_COST} honey and needs a free cell of comb; a wasp egg costs ${WASP_COST} and needs no comb, since wasps live in the colony's nest. It hatches after ${HATCH_TICKS} ticks into a bee of the role you name, like lay("builder"), which runs that role's script for life; lay() with no name lays a forager, and lay("wasp") a wasp (only once the colony has built its wasp nest; see build_nest). Naming a role that doesn't exist stops the game with an error, so typos show up right away. Laying too eagerly is the classic way to starve a colony before winter.`,
+    details: `Only the queen can lay, from queen.bee. An egg costs ${BEE_COST} honey and needs a free cell of comb; a wasp egg costs ${WASP_COST} and needs no comb, since wasps live in the colony's nest. It hatches after ${HATCH_TICKS} ticks into a bee of the role you name, like lay("builder"), which runs that role's script for life; lay() with no name lays a forager, and lay("wasp") a wasp (only once the colony has built its wasp nest; see build_nest). Naming a role that doesn't exist stops the game with an error, so typos show up right away. Laying too eagerly is the classic way to starve a colony before winter.
+
+A custom build: name the stats you want with name=value, and the egg hatches with them. lay(type="wasp", energy=300, damage=8) lays a wasp with a ${3 * MAX_ENERGY} tank and an 8-damage sting. Any stat can go from the role's default up to ${BUILD_MAX} times it (energy, capacity, damage and health), and each costs more the further it goes: a wasp with energy ${2 * MAX_ENERGY} costs ${eggCost('wasp', { energy: 2 * MAX_ENERGY })} honey, ${3 * MAX_ENERGY} costs ${eggCost('wasp', { energy: 3 * MAX_ENERGY })}, ${10 * MAX_ENERGY} costs ${eggCost('wasp', { energy: 10 * MAX_ENERGY })}. Damage is the dearest stat. egg_cost() gives any build's price before you lay. A strong unit still grows old like any other, so a big build is something you keep paying for.`,
     returns: 'True if she laid an egg; False without enough honey or free comb.',
     time: `${LAY_TICKS} ticks`,
     demo: {
@@ -305,10 +318,10 @@ export const DOCS: Record<string, DocEntry> = {
   // ---- raids and wasps ----
   health: {
     section: 'Raids and wasps',
-    details: `A bee has ${BEE_HEALTH} health and a wasp ${WASP_HEALTH}. A wasp's sting takes ${STING_DAMAGE} and a bee's ${BEE_STING_DAMAGE}, and at 0 the bee dies ("stung"). Stings come from other players' wasps and bees, and from wild wasps around their nests (in multiplayer). eat() at the hive heals as well as refilling energy: ${HEALTH_PER_HONEY} health per honey, and a hurt bee eats until it's whole. This bee starts hurt.`,
+    details: `A bee has ${BEE_HEALTH} health and a wasp ${WASP_HEALTH}. A wasp's sting takes ${STING_DAMAGE} and a bee's ${BEE_STING_DAMAGE}, and at 0 the bee dies ("stung"). Stings come from other players' wasps and bees, and from wild wasps around their nests (in multiplayer). eat() at the hive heals as well as refilling energy: ${HEALTH_PER_HONEY} health per honey, and a hurt bee eats until it's whole. This bee starts hurt. damage() says what this unit's own sting does. The queen can lay a unit with more health or a harder sting (see lay), and max_health() and damage() then report its own numbers.`,
     returns: 'Whole numbers.',
     time: instant,
-    covers: ['max_health'],
+    covers: ['max_health', 'damage'],
     demo: { forager: 'print("health:", health(), "of", max_health())\ngo_home()\nprint("ate", eat(), "honey")\nprint("health:", health())', view: [0, 3, 8, 7], health: 4, honey: 10 },
   },
   enemies_near: {

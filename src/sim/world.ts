@@ -100,6 +100,39 @@ export const WASP_COST = 30; // honey per wasp egg, once there's a nest
 export const BEE_CAPACITY = 3;
 export const WASP_CAPACITY = 6; // honey a wasp can carry off in a raid
 
+/** Stats the queen can raise when she lays, like lay(type="wasp", energy=300, damage=8). */
+export const STATS = ['energy', 'capacity', 'damage', 'health'] as const;
+export type Stat = (typeof STATS)[number];
+export type Build = Partial<Record<Stat, number>>;
+export const BUILD_MAX = 10; // a stat goes up to this many times its role's default
+/**
+ * Extra honey per egg for a stat at k times its default: BUILD_PRICE * (k - 1)², rounded. Tuned
+ * with strategy races: a little extra capacity or energy pays for itself, doubling capacity
+ * doesn't, and health and damage (which decide fights) cost the most.
+ */
+export const BUILD_PRICE: Record<Stat, number> = { energy: 6, capacity: 20, damage: 30, health: 30 };
+
+/** A role's stat as an egg hatches when the queen names nothing: wasps are tougher and carry more. */
+export function statDefault(role: string, stat: Stat): number {
+  const wasp = role === 'wasp';
+  switch (stat) {
+    case 'energy': return MAX_ENERGY;
+    case 'capacity': return wasp ? WASP_CAPACITY : BEE_CAPACITY;
+    case 'damage': return wasp ? STING_DAMAGE : BEE_STING_DAMAGE;
+    case 'health': return wasp ? WASP_HEALTH : BEE_HEALTH;
+  }
+}
+
+/** Honey for an egg of a role with a build: the role's price, plus each raised stat's share. */
+export function eggCost(role: string, build: Build = {}): number {
+  let cost = role === 'wasp' ? WASP_COST : BEE_COST;
+  for (const stat of STATS) {
+    const value = build[stat];
+    if (value !== undefined) cost += Math.round(BUILD_PRICE[stat] * (value / statDefault(role, stat) - 1) ** 2);
+  }
+  return cost;
+}
+
 // wild wasp nests (multiplayer): neutral, on unclaimed maps, stinging anyone's bees and wasps nearby
 export const WILD_NESTS = 3; // per world
 export const NEST_SPOT = { x: 12, y: 5 }; // where a nest hangs inside its map
@@ -193,6 +226,8 @@ export interface Bee extends Tile {
   carrying: number;
   capacity: number;
   energy: number;
+  maxEnergy: number; // its tank: MAX_ENERGY unless the queen laid it bigger
+  damage: number; // what its sting does
   health: number;
   maxHealth: number;
   age: number; // ticks lived; grows at half speed in winter
@@ -239,6 +274,7 @@ export interface Egg {
   role: string;
   laidAt: number;
   hatchAt: number;
+  build?: Build; // stats the queen raised when she laid it
 }
 
 // Everything happens somewhere, so a viewer of one map can keep only what happened on it.
@@ -1008,7 +1044,7 @@ export class World {
       if (this.error) return;
       while (colony.eggs.length && colony.eggs[0].hatchAt <= this.tick) {
         const egg = colony.eggs.shift()!;
-        const bee = this.spawn(colony, egg.role);
+        const bee = this.spawn(colony, egg.role, egg.build);
         colony.say(bee, 'Hatched.', 'note');
       }
       checkSurvival(colony);
@@ -1075,7 +1111,9 @@ export class World {
       nextNestId: save.nextNestId ?? 1, nestsToRegrow: save.nestsToRegrow ?? 0,
     });
     w.rng = mulberry32(save.rng);
-    for (const n of save.nests ?? []) w.nests.push({ ...n, wasps: n.wasps.map(b => ({ ...b, runner: new Runner([], {}) })) });
+    // saves from before custom builds: every unit has its role's default tank and sting
+    const stats = <T extends Body>(b: T): T => ({ ...b, maxEnergy: b.maxEnergy ?? MAX_ENERGY, damage: b.damage ?? statDefault(b.role, 'damage') });
+    for (const n of save.nests ?? []) w.nests.push({ ...n, wasps: n.wasps.map(b => ({ ...stats(b), runner: new Runner([], {}) })) });
     for (const cs of save.colonies) {
       const p = typeof programs === 'function' ? programs(cs) : programs;
       if (!p) continue;
@@ -1092,26 +1130,28 @@ export class World {
       for (const body of cs.bees) {
         // saves from before health existed: every bee at full health
         const maxHealth = body.maxHealth ?? (body.role === 'wasp' ? WASP_HEALTH : BEE_HEALTH);
-        const bee = { ...body, maxHealth, health: body.health ?? maxHealth, action: null } as Bee;
+        const bee = { ...stats(body), maxHealth, health: body.health ?? maxHealth, action: null } as Bee;
         bee.runner = c.runnerFor(bee);
         c.bees.push(bee);
       }
       // fallen bees run nothing; they only keep their last state for the inspector
-      for (const body of cs.fallen) c.fallen.push({ ...body, runner: new Runner([], {}) });
+      for (const body of cs.fallen) c.fallen.push({ ...stats(body), runner: new Runner([], {}) });
       w.colonies.push(c);
     }
     return w;
   }
 
   /** A new unit of a role at the colony's hive (eggs hatch through here). */
-  spawn(colony: Colony, role = 'forager'): Bee {
+  spawn(colony: Colony, role = 'forager', build: Build = {}): Bee {
     const lifespan = LIFESPAN_MIN + Math.floor(this.rng() * (LIFESPAN_MAX - LIFESPAN_MIN));
     const wasp = role === 'wasp';
-    const health = wasp ? WASP_HEALTH : BEE_HEALTH;
+    const stat = (s: Stat) => build[s] ?? statDefault(role, s);
+    const health = stat('health');
     const at = wasp && colony.nest ? colony.nest : colony.hive; // wasps hatch at the colony's nest
     const bee = {
-      id: this.nextId++, role, x: at.x, y: at.y, facing: 'south', carrying: 0, capacity: wasp ? WASP_CAPACITY : BEE_CAPACITY,
-      energy: MAX_ENERGY, health, maxHealth: health, age: 0, lifespan, bornAt: this.tick, action: null, death: null,
+      id: this.nextId++, role, x: at.x, y: at.y, facing: 'south', carrying: 0, capacity: stat('capacity'),
+      energy: stat('energy'), maxEnergy: stat('energy'), damage: stat('damage'),
+      health, maxHealth: health, age: 0, lifespan, bornAt: this.tick, action: null, death: null,
       stats: { collected: 0, delivered: 0, tilesFlown: 0, honeyEaten: 0, built: 0, stolen: 0, stings: 0 },
     } as Body as Bee;
     bee.runner = colony.runnerFor(bee);
@@ -1134,7 +1174,9 @@ export class World {
         q.action = { kind: 'nest', left: NEST_BUILD_TICKS, target: { x: result.args[0] as number, y: result.args[1] as number } };
       } else if (result.action === 'lay') {
         const role = (result.args[0] as string | undefined) ?? 'forager';
-        const cost = role === 'wasp' ? WASP_COST : BEE_COST;
+        // the stats the queen raised, as [stat, value] pairs (the API has checked them)
+        const build: Build = Object.fromEntries((result.args[1] as [Stat, number][] | undefined) ?? []);
+        const cost = eggCost(role, build);
         if (role === 'wasp' && !colony.nest && !colony.waspNoteShown) {
           colony.waspNoteShown = true;
           colony.say('queen', `Wasps hatch at a wasp nest, and the colony has none. Save up ${NEST_COST} honey and build one with build_nest(position).`, 'note');
@@ -1146,7 +1188,7 @@ export class World {
           // a brand-new colony's first egg hatches at once, so a new game doesn't open with nothing moving
           const first = q.laid === 0 && colony.bees.length === 0 && colony.eggs.length === 0;
           colony.honey -= cost;
-          colony.eggs.push({ role, laidAt: this.tick, hatchAt: this.tick + (first ? 1 : HATCH_TICKS) });
+          colony.eggs.push({ role, laidAt: this.tick, hatchAt: this.tick + (first ? 1 : HATCH_TICKS), ...(Object.keys(build).length ? { build } : {}) });
           q.laid++;
           this.events.push({ type: 'lay', x: colony.hive.x, y: colony.hive.y });
         }
@@ -1256,7 +1298,7 @@ export class World {
         : cause === 'by choice'
           ? `Gave its life at ${where}${lost}, freeing its cell of comb.`
         : cause === 'last sting'
-          ? `Stung ${by} and died doing it: a bee stings only once. Its sting did ${BEE_STING_DAMAGE} damage${lost ? `, and it was${lost}` : ''}.`
+          ? `Stung ${by} and died doing it: a bee stings only once. Its sting did ${bee.damage} damage${lost ? `, and it was${lost}` : ''}.`
           : `Died of old age at ${where}, ${(this.tick - bee.bornAt).toLocaleString('en-US')} ticks after hatching.`,
       'death',
     );
@@ -1400,11 +1442,11 @@ export class World {
       case 'eat': {
         // whole honey only, rounded to the nearest; a nearly full bee eats nothing rather than wasting a honey.
         // A hurt bee eats until it's healed, too.
-        const forEnergy = Math.round((MAX_ENERGY - bee.energy) / ENERGY_PER_HONEY);
+        const forEnergy = Math.round((bee.maxEnergy - bee.energy) / ENERGY_PER_HONEY);
         const forHealth = Math.ceil((bee.maxHealth - bee.health) / HEALTH_PER_HONEY);
         const eaten = colony.atHome(bee) ? Math.min(Math.max(forEnergy, forHealth), colony.honey) : 0;
         colony.honey -= eaten;
-        bee.energy = Math.min(MAX_ENERGY, bee.energy + eaten * ENERGY_PER_HONEY);
+        bee.energy = Math.min(bee.maxEnergy, bee.energy + eaten * ENERGY_PER_HONEY);
         bee.health = Math.min(bee.maxHealth, bee.health + eaten * HEALTH_PER_HONEY);
         bee.stats.honeyEaten += eaten;
         bee.runner.resume(eaten);
@@ -1470,13 +1512,14 @@ export class World {
    */
   /**
    * A sting on a tile next to the attacker: the first enemy unit there, or (from a player's wasp)
-   * an enemy nest. Says what it hit, or null when it missed. Wasps do STING_DAMAGE; a worker
-   * bee does BEE_STING_DAMAGE, only to units, and the caller ends its life.
+   * an enemy nest. Says what it hit, or null when it missed. A unit's sting does its own damage
+   * (by default STING_DAMAGE for a wasp, BEE_STING_DAMAGE for a bee); a worker bee stings only
+   * units, and the caller ends its life.
    */
   private strike(attacker: Bee, from: Colony | null, target: Tile): string | null {
     if (Math.abs(target.x - attacker.x) + Math.abs(target.y - attacker.y) > 1) return null; // the target flew off
     const wasp = attacker.role === 'wasp';
-    const damage = wasp ? STING_DAMAGE : BEE_STING_DAMAGE;
+    const damage = attacker.damage;
     const victims: { unit: Bee; colony: Colony | null; nest: Nest | null }[] = [];
     const at = (b: Bee) => b.x === target.x && b.y === target.y;
     if (from || !this.isHive(target)) {
@@ -1497,7 +1540,7 @@ export class World {
       this.endShield(from, owned);
       const n = owned.nest!;
       attacker.stats.stings = (attacker.stats.stings ?? 0) + 1;
-      n.health -= STING_DAMAGE;
+      n.health -= attacker.damage;
       this.events.push({ type: 'hit', id: 0, x: n.x, y: n.y });
       if (n.health <= 0) {
         owned.nest = null;
@@ -1511,7 +1554,7 @@ export class World {
     const nest = from && this.nestAt(target);
     if (!nest) return null;
     attacker.stats.stings = (attacker.stats.stings ?? 0) + 1;
-    nest.health -= STING_DAMAGE;
+    nest.health -= attacker.damage;
     this.events.push({ type: 'hit', id: 0, x: nest.x, y: nest.y });
     if (nest.health <= 0) {
       this.nests.splice(this.nests.indexOf(nest), 1);
@@ -1579,7 +1622,7 @@ export class World {
   private spawnWild(nest: Nest): void {
     nest.wasps.push({
       id: this.nextId++, role: 'wasp', x: nest.x, y: nest.y, facing: 'west', carrying: 0, capacity: 0,
-      energy: MAX_ENERGY, health: WASP_HEALTH, maxHealth: WASP_HEALTH, age: 0, lifespan: 1e9, bornAt: this.tick, action: null, death: null,
+      energy: MAX_ENERGY, maxEnergy: MAX_ENERGY, damage: STING_DAMAGE, health: WASP_HEALTH, maxHealth: WASP_HEALTH, age: 0, lifespan: 1e9, bornAt: this.tick, action: null, death: null,
       stats: { collected: 0, delivered: 0, tilesFlown: 0, honeyEaten: 0, built: 0, stolen: 0, stings: 0 },
       runner: new Runner([], {}),
     });

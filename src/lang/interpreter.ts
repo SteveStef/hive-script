@@ -20,11 +20,16 @@ export interface ActionRequest {
   args: Value[];
 }
 
+/** Named arguments a call passed (name=value), in the order written. */
+export type Named = Record<string, Value>;
+
 /** A built-in either answers right away or asks the game to perform an action. */
 export interface Builtin {
   kind: 'builtin';
   name: string;
-  call: (args: Value[], line: number) => Value | ActionRequest;
+  /** The named arguments it takes, if any; a call passing any other name is a mistake. */
+  named?: string[];
+  call: (args: Value[], line: number, named: Named) => Value | ActionRequest;
 }
 
 export class Scope {
@@ -233,14 +238,26 @@ function* evaluate(e: Expr, scope: Scope, depth: number): Generator<Pause, Value
       const callee = yield* evaluate(e.callee, scope, depth);
       const args: Value[] = [];
       for (const a of e.args) args.push(yield* evaluate(a, scope, depth));
-      return yield* call(callee, args, e.line, depth);
+      const named: Named = Object.create(null); // no inherited keys, so a parameter called toString can't match one
+      for (const n of e.named) named[n.name] = yield* evaluate(n.value, scope, depth);
+      return yield* call(callee, args, named, e.line, depth);
     }
   }
 }
 
-function* call(callee: Value, args: Value[], line: number, depth: number): Generator<Pause, Value, Value> {
+function* call(callee: Value, args: Value[], named: Named, line: number, depth: number): Generator<Pause, Value, Value> {
+  const names = Object.keys(named);
   if (isCallable(callee) && callee.kind === 'builtin') {
-    const result = callee.call(args, line);
+    const wrong = names.find(n => !callee.named?.includes(n));
+    if (wrong !== undefined) {
+      throw new ScriptError(
+        callee.named?.length
+          ? `${callee.name}() takes ${callee.named.map(n => `${n}=`).join(', ')}, not ${wrong}=.`
+          : `${callee.name}() doesn't take named values like ${wrong}=.`,
+        line,
+      );
+    }
+    const result = callee.call(args, line, named);
     if (isAction(result)) {
       const answer = yield { type: 'action', action: result.action, args: result.args, line };
       return answer ?? null;
@@ -248,12 +265,23 @@ function* call(callee: Value, args: Value[], line: number, depth: number): Gener
     return result;
   }
   if (isCallable(callee)) {
-    if (args.length !== callee.params.length) {
+    if (!names.length && args.length !== callee.params.length) {
       throw new ScriptError(`${callee.name}() takes ${callee.params.length} argument(s) but got ${args.length}.`, line);
     }
+    if (args.length > callee.params.length) {
+      throw new ScriptError(`${callee.name}() takes ${callee.params.length} argument(s) but got ${args.length} plain values.`, line);
+    }
+    // named values fill the parameters of the same name, after the plain ones fill the first few
+    for (const n of names) {
+      const at = callee.params.indexOf(n);
+      if (at < 0) throw new ScriptError(`${callee.name}() has no parameter called "${n}".`, line);
+      if (at < args.length) throw new ScriptError(`"${n}" is given twice: once in order, once by name.`, line);
+    }
+    const missing = callee.params.find((p, i) => i >= args.length && !(p in named));
+    if (missing !== undefined) throw new ScriptError(`${callee.name}() needs a value for "${missing}".`, line);
     if (depth >= MAX_CALL_DEPTH) throw new ScriptError('Too many functions calling each other (more than 64 deep).', line);
     const local = new Scope(callee.closure);
-    callee.params.forEach((p, i) => local.set(p, args[i]));
+    callee.params.forEach((p, i) => local.set(p, i < args.length ? args[i] : named[p]));
     try {
       yield* execBlock(callee.body, local, depth + 1);
     } catch (e) {

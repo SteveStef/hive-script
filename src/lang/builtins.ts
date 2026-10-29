@@ -3,8 +3,9 @@ import { format, type Builtin, type Value } from './interpreter';
 
 const MAX_RANGE = 10_000;
 
-export function builtin(name: string, call: Builtin['call']): Builtin {
-  return { kind: 'builtin', name, call };
+/** A built-in function; named lists the name=value arguments it takes, if any. */
+export function builtin(name: string, call: Builtin['call'], named?: string[]): Builtin {
+  return named ? { kind: 'builtin', name, call, named } : { kind: 'builtin', name, call };
 }
 
 export function expectArgs(name: string, args: Value[], count: number, line: number): void {

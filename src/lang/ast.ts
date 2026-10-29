@@ -12,7 +12,7 @@ export type Expr =
   | { kind: 'name'; name: string; line: number }
   | { kind: 'list'; items: Expr[]; line: number }
   | { kind: 'index'; target: Expr; index: Expr; line: number }
-  | { kind: 'call'; callee: Expr; args: Expr[]; line: number }
+  | { kind: 'call'; callee: Expr; args: Expr[]; named: { name: string; value: Expr }[]; line: number } // named: name=value arguments
   | { kind: 'unary'; op: '-' | 'not'; operand: Expr; line: number }
   | { kind: 'binary'; op: BinOp; left: Expr; right: Expr; line: number }
   | { kind: 'logic'; op: 'and' | 'or'; left: Expr; right: Expr; line: number };

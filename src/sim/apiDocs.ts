@@ -1,7 +1,8 @@
 import {
   BEE_COST, BUILD_COST, BUILD_TICKS, COLLECT_TICKS, DEPOSIT_TICKS, EAT_TICKS, ENERGY_PER_HONEY, ENERGY_PER_TILE,
   HATCH_TICKS, LAY_TICKS, MARK_TICKS, MAX_ENERGY, MAX_WAIT, MOVE_TICKS, SCENT_LIFE, SCENT_MAX, SEASON_TICKS, SENSE_RANGE, SMELL_RANGE,
-  HEALTH_PER_HONEY, NEST_BUILD_TICKS, NEST_COST, STEAL_TICKS, BEE_STING_DAMAGE, STING_DAMAGE, STING_TICKS, WASP_COST,
+  HEALTH_PER_HONEY, NEST_BUILD_TICKS, NEST_COST, STEAL_TICKS, BEE_STING_DAMAGE, STING_DAMAGE, STING_TICKS, WASP_COST, BUILD_MAX,
+  BEE_CAPACITY, WASP_CAPACITY,
 } from './world';
 
 export interface ApiDoc {
@@ -50,11 +51,11 @@ export const API_DOCS: ApiDoc[] = [
   { name: 'random_spot', signature: 'random_spot()', insert: 'random_spot()', only: 'worker',
     doc: 'A random open tile on your own map, as [x, y]: somewhere new to explore when nothing is in sight.' },
   { name: 'nectar', signature: 'nectar()', insert: 'nectar()', only: 'worker', doc: 'How much nectar you are carrying.' },
-  { name: 'capacity', signature: 'capacity()', insert: 'capacity()', only: 'worker', doc: 'How much nectar you can carry at once.' },
+  { name: 'capacity', signature: 'capacity()', insert: 'capacity()', only: 'worker', doc: `How much you can carry at once: ${BEE_CAPACITY} nectar for a bee, ${WASP_CAPACITY} honey for a wasp, unless the queen laid you with more.` },
   { name: 'at_hive', signature: 'at_hive()', insert: 'at_hive()', doc: 'True if you are at the hive, or for a wasp at its nest (always, for the queen).' },
   { name: 'energy', signature: 'energy()', insert: 'energy()', only: 'worker',
     doc: `Energy left, 0 to ${MAX_ENERGY}. Flying costs ${ENERGY_PER_TILE} per tile (double in winter) and working costs a little. At 0 you starve.` },
-  { name: 'max_energy', signature: 'max_energy()', insert: 'max_energy()', only: 'worker', doc: `The most energy a bee can hold (${MAX_ENERGY}).` },
+  { name: 'max_energy', signature: 'max_energy()', insert: 'max_energy()', only: 'worker', doc: `The most energy you can hold: ${MAX_ENERGY}, unless the queen laid you with more.` },
   { name: 'age', signature: 'age()', insert: 'age()', only: 'worker', doc: 'How many ticks you have been alive.' },
   { name: 'life_left', signature: 'life_left()', insert: 'life_left()', only: 'worker', doc: 'Ticks until you die of old age.' },
 
@@ -67,8 +68,10 @@ export const API_DOCS: ApiDoc[] = [
     doc: `How strong that scent is on your tile: ${SCENT_MAX} when just marked, fading to 0.` },
 
   // the queen
-  { name: 'lay', signature: 'lay() or lay(role)', insert: 'lay()', only: 'queen',
-    doc: `Lay an egg (${LAY_TICKS} ticks). Costs ${BEE_COST} honey and needs a free cell of comb (a wasp egg needs the nest instead). It hatches after ${HATCH_TICKS} ticks into a bee of that role, like lay("builder"), or a forager if you name none. lay("wasp") costs ${WASP_COST} and needs the colony's wasp nest (build_nest). Returns True if she laid.` },
+  { name: 'egg_cost', signature: 'egg_cost(role, energy=..., capacity=..., damage=..., health=...)', insert: 'egg_cost(${1:"wasp"})',
+    doc: `The honey an egg would cost, with the same arguments as lay(): egg_cost() for a forager, egg_cost("wasp"), egg_cost(type="wasp", energy=300).` },
+  { name: 'lay', signature: 'lay(), lay(role) or lay(type=role, energy=..., capacity=..., damage=..., health=...)', insert: 'lay()', only: 'queen',
+    doc: `Lay an egg (${LAY_TICKS} ticks). Costs ${BEE_COST} honey and needs a free cell of comb (a wasp egg needs the nest instead). It hatches after ${HATCH_TICKS} ticks into a bee of that role, like lay("builder"), or a forager if you name none. lay("wasp") costs ${WASP_COST} and needs the colony's wasp nest (build_nest). Returns True if she laid. Name stats to lay it stronger, like lay(type="wasp", energy=300, damage=8): each goes from the role's default up to ${BUILD_MAX} times it, and costs more honey the further it goes (egg_cost() says how much).` },
 
   // the colony, for everyone
   { name: 'roles', signature: 'roles()', insert: 'roles()', doc: 'Every role\'s name, forager first, like ["forager", "builder"].' },
@@ -99,7 +102,9 @@ export const API_DOCS: ApiDoc[] = [
     doc: "The gaps in the hedges around your colony's map, nearest first, as a list of positions. Each gate is two tiles wide." },
   { name: 'health', signature: 'health()', insert: 'health()', only: 'worker',
     doc: `This bee's or wasp's health. A wasp's sting takes ${STING_DAMAGE}, a bee's ${BEE_STING_DAMAGE}; at 0 it dies. eat() at the hive heals ${HEALTH_PER_HONEY} per honey.` },
-  { name: 'max_health', signature: 'max_health()', insert: 'max_health()', only: 'worker', doc: 'Full health: 10 for a bee, 30 for a wasp.' },
+  { name: 'max_health', signature: 'max_health()', insert: 'max_health()', only: 'worker', doc: 'Full health: 10 for a bee, 30 for a wasp, unless the queen laid you tougher.' },
+  { name: 'damage', signature: 'damage()', insert: 'damage()', only: 'worker',
+    doc: `What your sting does: ${STING_DAMAGE} for a wasp, ${BEE_STING_DAMAGE} for a bee, unless the queen laid you stronger.` },
   { name: 'enemies_near', signature: 'enemies_near()', insert: 'enemies_near()', only: 'worker',
     doc: `Positions of other colonies' bees and wasps, and wild wasps, within sight (${SENSE_RANGE} tiles), nearest first; protected new colonies don't count. An empty list when there are none.` },
   { name: 'owner_at', signature: 'owner_at(position)', insert: 'owner_at(${1:position})',

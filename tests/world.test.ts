@@ -6,6 +6,7 @@ import {
   BEE_COST, BUILD_COST, HATCH_TICKS, LAY_TICKS, LIFESPAN_MAX, MARK_TICKS, MAX_ENERGY, MOVE_TICKS, SCENT_LIFE, SCENT_MAX,
   BLOOMS, bloom, bloomMap, COLS, hedgeLayout, HIVE_SPOT, inFootprint, NEW_COLONY, ROWS, seasonAt, START_HONEY, VISITOR_PATIENCE, SEASON_TICKS, SENSE_RANGE, SHARED_LINE_BASE, START_BEES, START_COMB, tileKey, World,
   BEE_HEALTH, HATCH_TICKS as HATCH, NEST_BUILD_TICKS, NEST_COST, NEST_HEALTH, NEST_WASPS, STING_DAMAGE, STING_TICKS, WASP_CAPACITY, WASP_COST, WASP_HEALTH,
+  BEE_STING_DAMAGE, eggCost,
 } from '../src/sim/world';
 import { toJson } from '../src/sim/view';
 
@@ -1255,5 +1256,78 @@ describe('a lone wild wasp visiting single player', () => {
     seasonHook.visitorsAtSeason('winter'); // still around a season later: simply gone
     expect(visitors(world)).toEqual([]);
     expect(world.colony.log.some(l => l.text === 'The wild wasp flew off.')).toBe(true);
+  });
+});
+
+describe('custom builds: lay(type="wasp", energy=300, damage=8)', () => {
+  const idle = 'while True:\n    wait(100)';
+  const programs = (queen: string, worker = idle, forager = worker) => ({ forager: parse(forager), queen: parse(queen), wasp: parse(worker), shared: SHARED });
+  const stats = 'print(role(), max_energy(), capacity(), damage(), max_health())\nwhile True:\n    wait(100)';
+
+  it('prices a build by how far each stat goes past its default', () => {
+    expect(eggCost('forager')).toBe(BEE_COST);
+    expect(eggCost('wasp')).toBe(WASP_COST);
+    expect(eggCost('wasp', { energy: 200 })).toBe(WASP_COST + 6);
+    expect(eggCost('wasp', { energy: 1000 })).toBe(WASP_COST + 486); // 6 * (10 - 1)²
+    expect(eggCost('wasp', { energy: 300, damage: 8 })).toBe(WASP_COST + 24 + 11);
+  });
+
+  it('charges exactly what egg_cost() says, and the unit hatches with the build', () => {
+    const queen = 'print(egg_cost(type="wasp", energy=300, damage=8))\nprint(lay(type="wasp", energy=300, damage=8))\nprint(lay(capacity=6))\nwhile True:\n    wait(1000)';
+    const world = new World(programs(queen, stats), 1, { bees: 0, nest: [5, 6] });
+    world.colony.honey = 100;
+    simulate(world, HATCH + 80);
+    const cost = eggCost('wasp', { energy: 300, damage: 8 });
+    expect(world.colony.honey).toBe(100 - cost - eggCost('forager', { capacity: 6 }));
+    // the queen's lines and the two units' lines (the first egg of an empty colony hatches at once)
+    expect(printed(world).sort()).toEqual([String(cost), 'True', 'True', `forager 100 6 ${BEE_STING_DAMAGE} ${BEE_HEALTH}`, `wasp 300 ${WASP_CAPACITY} 8 ${WASP_HEALTH}`].sort());
+    expect(world.colony.bees.find(b => b.role === 'wasp')!.energy).toBeGreaterThan(MAX_ENERGY); // it hatched with a full 300 tank
+  });
+
+  it("refuses stats below the default, above 10x, not whole, or unknown, and lays nothing it can't afford", () => {
+    const err = (queen: string) => simulate(new World(programs(queen), 1, { bees: 0, nest: [5, 6], honey: 50 }), 5).error?.message;
+    expect(err('lay(energy=50)')).toMatch(/A forager's energy can be from 100 \(its default\) up to 1000, not 50/);
+    expect(err('lay(type="wasp", damage=51)')).toMatch(/A wasp's damage can be from 5 \(its default\) up to 50, not 51/);
+    expect(err('lay(energy=150.5)')).toMatch(/energy= needs a whole number/);
+    expect(err('lay("wasp", type="wasp")')).toMatch(/got the role twice/);
+    expect(err('lay(speed=2)')).toMatch(/lay\(\) takes type=, energy=, capacity=, damage=, health=, not speed=/);
+    const poor = new World(programs('print(lay(capacity=9))\nwhile True:\n    wait(1000)'), 1, { bees: 0 });
+    poor.colony.honey = 20; // the build costs far more
+    simulate(poor, 40);
+    expect(printed(poor)).toEqual(['False']);
+    expect(poor.colony.honey).toBe(20);
+  });
+
+  it('eats up to its own bigger tank', () => {
+    const world = new World(programs(IDLE_QUEEN, 'print(eat(), energy())\nwhile True:\n    wait(100)'), 1, { bees: 0 });
+    const bee = world.spawn(world.colony, 'forager', { energy: 200 });
+    bee.energy = 40;
+    world.colony.honey = 10;
+    simulate(world, 20);
+    const [ate, after] = printed(world)[0].split(' ').map(Number);
+    expect(ate).toBe(4); // 160 energy is 4 honey
+    expect(after).toBeGreaterThan(195); // filled to its 200 tank (less a little for the eating itself)
+  });
+
+  it("stings with its own damage: a 20-damage wasp stings a nest down in 3 stings, not 12", () => {
+    const run = (damage: number) => {
+      const world = new World(null, 5, { maps: [5, 5], haltOnError: false });
+      const home = world.found(programs(idle), { x: 0, y: 0 }, 'home');
+      home.nest = { x: 6, y: 3, health: NEST_HEALTH, maxHealth: NEST_HEALTH };
+      const enemy = world.found(programs(IDLE_QUEEN, 'move_to([7, 3])\nn = 0\nwhile sting([6, 3]):\n    n += 1\nprint(n)\nwhile True:\n    wait(100)', idle), { x: 1, y: 0 }, 'enemy');
+      world.spawn(enemy, 'wasp', damage === STING_DAMAGE ? {} : { damage });
+      simulate(world, 200 + 12 * STING_TICKS);
+      return enemy.log.filter(l => !l.tone).map(l => l.text);
+    };
+    expect(run(20)).toEqual(['3']);
+    expect(run(STING_DAMAGE)).toEqual([String(NEST_HEALTH / STING_DAMAGE)]);
+  });
+
+  it('loads saves from before builds existed with every unit at its role\'s defaults', () => {
+    const world = new World(programs(IDLE_QUEEN), 1, { bees: 1, wasps: 1, nest: [5, 6] });
+    const save = JSON.parse(JSON.stringify(world.save()));
+    for (const b of save.colonies[0].bees) { delete b.maxEnergy; delete b.damage; }
+    const back = World.restore(programs(IDLE_QUEEN), save);
+    expect(back.colony.bees.map(b => [b.role, b.maxEnergy, b.damage])).toEqual([['forager', MAX_ENERGY, BEE_STING_DAMAGE], ['wasp', MAX_ENERGY, STING_DAMAGE]]);
   });
 });

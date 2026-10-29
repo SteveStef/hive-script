@@ -1,7 +1,7 @@
 import { builtin, coreBuiltins, expectArgs } from '../lang/builtins';
 import { ScriptError } from '../lang/errors';
-import { format, type ActionRequest, type Value } from '../lang/interpreter';
-import { COLS, DIRS, MAX_ENERGY, MAX_WAIT, NEST_COST, ROWS, SCENT_NAME_MAX, type Bee, type Colony } from './world';
+import { format, type ActionRequest, type Named, type Value } from '../lang/interpreter';
+import { BUILD_MAX, COLS, DIRS, eggCost, MAX_WAIT, NEST_COST, ROWS, SCENT_NAME_MAX, statDefault, STATS, type Bee, type Build, type Colony } from './world';
 
 const act = (action: string, args: Value[] = []): ActionRequest => ({ action, args });
 
@@ -10,6 +10,31 @@ function roleName(colony: Colony, name: string, v: Value, line: number): string 
   if (typeof v !== 'string') throw new ScriptError(`${name}() needs a role's name as text, like "forager", not ${format(v, true)}.`, line);
   if (!colony.roleNames.includes(v)) throw new ScriptError(`There's no role called "${v}". Your roles: ${colony.roleNames.join(', ')}.`, line);
   return v;
+}
+
+/** The named values lay() and egg_cost() take: the role, and the stats to raise (read late: world.ts imports this file too). */
+const eggNames = () => ['type', ...STATS];
+
+/**
+ * The egg a lay() or egg_cost() call asks for: a role, given plainly or as type=, and any stats
+ * raised above the role's default, up to BUILD_MAX times it, like lay(type="wasp", energy=300).
+ */
+function eggOrder(colony: Colony, name: string, args: Value[], named: Named, line: number): { role: string; build: Build } {
+  if (args.length > 1) throw new ScriptError(`${name}() takes a role's name (or nothing, for a forager) and stats like energy=300, but got ${args.length} plain values.`, line);
+  if (args.length && 'type' in named) throw new ScriptError(`${name}() got the role twice: give it once, as "wasp" or as type="wasp".`, line);
+  const which = args.length ? args[0] : named.type;
+  const role = which === undefined ? 'forager' : roleName(colony, name, which, line);
+  const build: Build = {};
+  for (const stat of STATS) {
+    const v = named[stat];
+    if (v === undefined) continue;
+    const low = statDefault(role, stat);
+    const high = low * BUILD_MAX;
+    if (typeof v !== 'number' || !Number.isInteger(v)) throw new ScriptError(`${stat}= needs a whole number: from ${low} to ${high} for a ${role}.`, line);
+    if (v < low || v > high) throw new ScriptError(`A ${role}'s ${stat} can be from ${low} (its default) up to ${high}, not ${v}.`, line);
+    if (v > low) build[stat] = v;
+  }
+  return { role, build };
 }
 
 /** A position a script passed in: two whole numbers, inside the world. */
@@ -38,6 +63,10 @@ function colonyGlobals(colony: Colony): Record<string, Value> {
       expectArgs('roles', args, 0, line);
       return colony.roleNames;
     }),
+    egg_cost: builtin('egg_cost', (args, line, named) => {
+      const { role, build } = eggOrder(colony, 'egg_cost', args, named, line);
+      return eggCost(role, build);
+    }, eggNames()),
     role_count: builtin('role_count', (args, line) => {
       expectArgs('role_count', args, 1, line);
       const role = roleName(colony, 'role_count', args[0], line);
@@ -194,7 +223,8 @@ export function beeGlobals(colony: Colony, bee: Bee): Record<string, Value> {
     capacity: builtin('capacity', () => bee.capacity),
     at_hive: builtin('at_hive', () => colony.atHome(bee)),
     energy: builtin('energy', () => Math.floor(bee.energy)),
-    max_energy: builtin('max_energy', () => MAX_ENERGY),
+    max_energy: builtin('max_energy', () => bee.maxEnergy),
+    damage: builtin('damage', () => bee.damage),
     health: builtin('health', () => bee.health),
     max_health: builtin('max_health', () => bee.maxHealth),
     enemies_near: builtin('enemies_near', (args, line) => {
@@ -231,7 +261,7 @@ export function beeGlobals(colony: Colony, bee: Bee): Record<string, Value> {
 }
 
 // Worker actions the queen might reach for; each gets a clear explanation instead of "not defined".
-const WORKER_ONLY = ['move', 'move_to', 'go_home', 'collect', 'deposit', 'eat', 'build', 'mark', 'die', 'role', 'steal', 'sting', 'health', 'max_health', 'enemies_near', 'flowers_near', 'nectar_at'];
+const WORKER_ONLY = ['move', 'move_to', 'go_home', 'collect', 'deposit', 'eat', 'build', 'mark', 'die', 'role', 'steal', 'sting', 'health', 'max_health', 'damage', 'enemies_near', 'flowers_near', 'nectar_at'];
 
 /** Everything the queen's script (queen.bee) can see. */
 export function queenGlobals(colony: Colony): Record<string, Value> {
@@ -252,10 +282,11 @@ export function queenGlobals(colony: Colony): Record<string, Value> {
       expectArgs('gates', args, 0, line);
       return colony.world.gatesOf(colony.map, colony.hive).map(t => [t.x, t.y]);
     }),
-    lay: builtin('lay', (args, line) => {
-      if (args.length > 1) throw new ScriptError(`lay() takes a role's name, or nothing for a forager, but got ${args.length} values.`, line);
-      return act('lay', args.length ? [roleName(colony, 'lay', args[0], line)] : []);
-    }),
+    lay: builtin('lay', (args, line, named) => {
+      const { role, build } = eggOrder(colony, 'lay', args, named, line);
+      const raised = Object.entries(build);
+      return act('lay', raised.length ? [role, raised] : [role]);
+    }, eggNames()),
   };
   for (const name of WORKER_ONLY) {
     globals[name] = builtin(name, (_args, line) => {

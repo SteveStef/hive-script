@@ -60,6 +60,40 @@ describe('statements', () => {
   });
 });
 
+describe('named arguments (name=value)', () => {
+  const trip = 'def trip(to, carry):\n    return to * 10 + carry\n';
+  const error = (src: string, extra: Record<string, Value> = {}) => {
+    const { result } = run(src, extra);
+    return result.type === 'error' ? result.error.message : '(no error)';
+  };
+
+  it('fill a function\'s parameters by name, in any order, after any plain values', () => {
+    expect(run(`${trip}print(trip(carry=3, to=2), trip(2, carry=3), trip(2, 3))`).out).toEqual(['23 23 23']);
+  });
+
+  it('explain a name that is unknown, given twice, or left out', () => {
+    expect(error(`${trip}trip(2, cargo=3)`)).toMatch(/trip\(\) has no parameter called "cargo"/);
+    expect(error(`${trip}trip(2, to=1)`)).toMatch(/"to" is given twice/);
+    expect(error(`${trip}trip(carry=1)`)).toMatch(/trip\(\) needs a value for "to"/);
+    expect(error(`${trip}trip(1, 2, 3)`)).toMatch(/takes 2 argument/);
+    expect(parseError('trip(to=1, 2)').message).toMatch(/Plain values go before named ones/);
+    expect(parseError('trip(to=1, to=2)').message).toMatch(/"to" is given twice/);
+  });
+
+  it('reach a built-in only if it takes that name', () => {
+    const tag = builtin('tag', (_args, _line, named) => `x is ${named.x}`, ['x']);
+    expect(run('print(tag(x=5))', { tag }).out).toEqual(['x is 5']);
+    expect(error('tag(y=5)', { tag })).toMatch(/tag\(\) takes x=, not y=/);
+    expect(error('print(sep=1)')).toMatch(/print\(\) doesn't take named values like sep=/);
+  });
+
+  it('leave == alone, and a parameter can be called anything, even toString', () => {
+    expect(run('a = 1\nprint(a == 1, [a == 1, a == 2])').out).toEqual(['True [True, False]']);
+    expect(run('def f(toString):\n    return toString\nprint(f(toString=4))').out).toEqual(['4']);
+    expect(error('def f(toString):\n    return toString\nf()')).toMatch(/takes 1 argument/);
+  });
+});
+
 describe('pausing for the game', () => {
   const collect = builtin('collect', () => ({ action: 'collect', args: [] }));
 
