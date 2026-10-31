@@ -6,9 +6,9 @@ import {
   BEE_COST, BUILD_COST, HATCH_TICKS, LAY_TICKS, LIFESPAN_MAX, MARK_TICKS, MAX_ENERGY, MOVE_TICKS, SCENT_LIFE, SCENT_MAX,
   BLOOMS, bloom, bloomMap, COLS, hedgeLayout, HIVE_SPOT, inFootprint, NEW_COLONY, ROWS, seasonAt, START_HONEY, VISITOR_PATIENCE, SEASON_TICKS, SENSE_RANGE, SHARED_LINE_BASE, START_BEES, START_COMB, tileKey, World,
   BEE_HEALTH, HATCH_TICKS as HATCH, NEST_BUILD_TICKS, NEST_COST, NEST_HEALTH, NEST_WASPS, STING_DAMAGE, STING_TICKS, WASP_COST, WASP_HEALTH,
-  BEE_STING_DAMAGE, eggCost,
+  BEE_STING_DAMAGE, BOARD_ITEMS, BOARD_NAMES, BOARD_TEXT, eggCost, TELL_TICKS,
 } from '../src/sim/world';
-import { toJson } from '../src/sim/view';
+import { RemoteColony, toJson } from '../src/sim/view';
 
 const IDLE_QUEEN = 'while True:\n    wait(1000)';
 const GREEDY_QUEEN = 'while True:\n    if not lay():\n        wait(30)';
@@ -1379,5 +1379,75 @@ describe("single player's two maps: home, and a wild nest next door", () => {
     const world = simulate(new World({ forager: parse(IDLE_QUEEN), queen: parse(IDLE_QUEEN), shared: SHARED }, 1, { ...SINGLE, bees: 0 }), year);
     expect(world.colony.over).not.toBeNull();
     expect(world.running).toBe(false);
+  });
+});
+
+describe('the hive board', () => {
+  const STAY = '\nwhile True:\n    wait(100)';
+
+  it('tell() takes time, and any bee at home can recall() it', () => {
+    const world = makeWorld(`print(recall("spot"))\nprint(tell("spot", [5, 3]))\nprint(recall("spot"))${STAY}`);
+    simulate(world, TELL_TICKS);
+    expect(world.colony.board.size).toBe(0);
+    simulate(world, 2);
+    expect(world.colony.board.get('spot')).toEqual([5, 3]);
+    expect(printed(world)).toEqual(['None', 'True', '[5, 3]']);
+  });
+
+  it('away from home, tell() returns False and recall() returns None', () => {
+    const world = makeWorld(`tell("a", 1)\nmove(East)\nprint(tell("b", 2), recall("a"))${STAY}`);
+    simulate(world, 2 * TELL_TICKS + MOVE_TICKS + 3);
+    expect([...world.colony.board.keys()]).toEqual(['a']);
+    expect(printed(world)).toEqual(['False None']);
+  });
+
+  it('holds BOARD_NAMES names; telling a name again replaces it, and None frees it', () => {
+    const fill = Array.from({ length: BOARD_NAMES }, (_, i) => `tell("n${i}", ${i})`).join('\n');
+    const world = makeWorld(`${fill}\nprint(tell("extra", 1))\nprint(tell("n0", 9))\ntell("n1", None)\nprint(tell("extra", 1))${STAY}`);
+    simulate(world, (BOARD_NAMES + 4) * TELL_TICKS + 3);
+    expect(printed(world)).toEqual(['False', 'True', 'True']);
+    expect(world.colony.board.get('n0')).toBe(9);
+    expect(world.colony.board.has('n1')).toBe(false);
+    expect(world.colony.board.size).toBe(BOARD_NAMES);
+  });
+
+  it('turns away a value too big for it, with False', () => {
+    const items = `[${Array.from({ length: BOARD_ITEMS + 1 }, () => '1').join(', ')}]`;
+    const text = JSON.stringify('x'.repeat(BOARD_TEXT + 1));
+    const world = makeWorld(`print(tell("a", ${items}))\nprint(tell("b", ${text}))\nprint(tell("c", [[1, 2, 3]]))\nprint(tell("d", [[[1, 2], [3, 4]]]))${STAY}`);
+    simulate(world, 4 * TELL_TICKS + 3);
+    expect(printed(world)).toEqual(['False', 'False', 'False', 'False']);
+    expect(world.colony.board.size).toBe(0);
+  });
+
+  it('takes no functions, and needs a name as text', () => {
+    expect(simulate(makeWorld('tell("a", [get_pos])'), 3).error?.message).toMatch(/not a function/);
+    expect(simulate(makeWorld('recall(5)'), 3).error?.message).toMatch(/name as text/);
+  });
+
+  it('the queen can use it too', () => {
+    const world = makeWorld(`wait(20)\nprint(recall("plan"))${STAY}`, `print(tell("plan", "attack"), recall("plan"))${STAY}`);
+    simulate(world, 25);
+    expect(printed(world)).toEqual(['True attack', 'attack']);
+  });
+
+  it('a wasp uses it at its nest, and nobody reads another colony\'s board', () => {
+    const world = new World({ forager: parse('while True:\n    wait(100)'), queen: parse(IDLE_QUEEN), shared: SHARED, wasp: parse(`print(tell("w", 1))\nmove_to([3, 6])\nprint(tell("x", 2), recall("w"))${STAY}`) }, 1, { wasps: 1, nest: [4, 6] });
+    simulate(world, 60);
+    expect(world.colony.board.get('w')).toBe(1);
+    expect(world.colony.board.has('x')).toBe(false);
+    expect(printed(world)).toEqual(['True', 'False None']);
+  });
+
+  it('stays through a deploy, a save and the view sent to the browser', () => {
+    const world = makeWorld(`tell("spot", [5, 3])${STAY}`);
+    simulate(world, TELL_TICKS + 2);
+    world.colony.deploy(world.colony.programs!);
+    expect(world.colony.board.get('spot')).toEqual([5, 3]);
+    const back = World.restore(world.colony.programs!, world.save());
+    expect(back.colony.board.get('spot')).toEqual([5, 3]);
+    const seen = new RemoteColony();
+    seen.update(toJson(world, world.colony, world.colony.map));
+    expect(seen.board.get('spot')).toEqual([5, 3]);
   });
 });

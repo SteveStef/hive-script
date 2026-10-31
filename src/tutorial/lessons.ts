@@ -1,7 +1,7 @@
 import { DEFAULT_SHARED } from '../defaultScript';
 import { parse } from '../lang/parser';
 import type { ScriptSet } from '../sim/scripts';
-import { eggCost, NEST_HEALTH, SCENT_LIFE, SEASON_TICKS, SENSE_RANGE, World, type Programs, type ScriptFile, type WorldOptions } from '../sim/world';
+import { BOARD_ITEMS, BOARD_NAMES, eggCost, NEST_HEALTH, SCENT_LIFE, SEASON_TICKS, SENSE_RANGE, World, type Programs, type ScriptFile, type WorldOptions } from '../sim/world';
 
 /** One goal of a lesson, checked against the running world after every tick. */
 export interface Goal {
@@ -303,6 +303,34 @@ export const LESSONS: Lesson[] = [
     hints: ['Cut the def report(): block (both lines) from forager.bee and paste it into shared.bee.', 'Delete the copy in scout.bee too; its report() call keeps working.'],
     recap: 'shared.bee keeps common code in one place; role() lets shared code act differently per role.',
     budget: 400,
+  },
+  {
+    id: 'board',
+    topic: 'Advanced tools',
+    title: 'The hive board',
+    intro: `
+      <p>Scent works out in the meadow. For news that everyone at home should hear, the colony has a board, like a bee's waggle dance. ${fn('tell', '"flowers", found')} puts a value on it, and ${fn('recall', '"flowers"')} reads it back.
+      Both work only at the hive, so news travels when a bee flies home. It holds ${BOARD_NAMES} names, and a list can hold ${BOARD_ITEMS} items. The <b>Board</b> tab beside the log shows what's on it.</p>
+      <p>The flowers here are far from the hive. <b>Do this:</b> in scout.bee, fly to ${code('[12, 3]')}, save ${fn('flowers_near')} in a variable, fly home and tell the hive. In forager.bee, wait for the news, then gather from those flowers.</p>`,
+    tabs: ['forager', 'queen'],
+    starter: {
+      forager: 'while True:\n    wait(30)\n',
+      queen: 'lay("scout")\nwhile True:\n    wait(100)\n',
+      roles: [['scout', '# scout.bee\nwhile True:\n    wait(100)\n']],
+    },
+    solution: {
+      forager: 'spots = None\nwhile not spots:\n    wait(20)\n    spots = recall("flowers")\nwhile True:\n    move_to(spots[random(len(spots))])\n    while nectar() < capacity() and collect():\n        pass\n    go_home()\n    deposit()\n    eat()\n',
+      queen: 'lay("scout")\nwhile True:\n    wait(100)\n',
+      roles: [['scout', '# scout.bee\nmove_to([12, 3])\nfound = flowers_near()\ngo_home()\ntell("flowers", found)\nwhile True:\n    wait(100)\n']],
+    },
+    world: meadow([[14, 1], [15, 1], [14, 2], [15, 2], [15, 3]], { bees: 2, honey: 10 }),
+    goals: [
+      { text: 'The scout tells the hive where the flowers are', check: w => Array.isArray(w.colony.board.get('flowers')) && (w.colony.board.get('flowers') as unknown[]).length > 0 },
+      { text: '12 honey made', check: w => made(w) >= 12 },
+    ],
+    hints: ['In scout.bee: move_to([12, 3]), then found = flowers_near(), go_home(), and tell("flowers", found).', 'In forager.bee, recall("flowers") gives None until the news arrives, so loop with a wait() until it gives a list. Then pick from the list with spots[random(len(spots))].'],
+    recap: 'Scent tells bees out in the field; the board tells bees at home. Nothing on it updates itself, so a good script replaces old news.',
+    budget: 2500,
   },
 
   // ---- multiplayer ----

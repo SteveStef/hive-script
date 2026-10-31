@@ -153,6 +153,8 @@ body.focus-code .layout, body.focus-game .layout { grid-template-columns: minmax
 .chat-form input { flex: 1; min-width: 0; font: 13px var(--font-mono); color: var(--fg); background: #262015; border: 1px solid var(--line); padding: 5px 8px; }
 .chat-form input:focus { outline: 2px solid var(--honey); outline-offset: -1px; }
 .chat-form .pbtn { font-size: 13px; padding: 2px 10px; }
+.board-row { display: grid; grid-template-columns: minmax(0, 10em) minmax(0, 1fr); gap: 12px; overflow-wrap: anywhere; }
+.board-name { color: var(--honey); }
 .leaders table { width: 100%; border-collapse: collapse; font-variant-numeric: tabular-nums; }
 .leaders th { position: sticky; top: 0; background: var(--panel); color: var(--muted); font-weight: 400; font-size: 11px; text-align: right; padding: 2px 6px; }
 .leaders td { text-align: right; padding: 2px 6px; border-top: 1px solid var(--line); }

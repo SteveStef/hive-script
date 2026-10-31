@@ -1,6 +1,6 @@
 import {
   BEE_COST, BUILD_COST, BUILD_TICKS, COLLECT_TICKS, DEPOSIT_TICKS, EAT_TICKS, ENERGY_PER_HONEY, ENERGY_PER_TILE,
-  HATCH_TICKS, LAY_TICKS, MARK_TICKS, MAX_ENERGY, MAX_WAIT, MOVE_TICKS, SCENT_LIFE, SCENT_MAX, SEASON_TICKS, SENSE_RANGE, SMELL_RANGE,
+  BOARD_ITEMS, BOARD_NAMES, HATCH_TICKS, LAY_TICKS, MARK_TICKS, TELL_TICKS, MAX_ENERGY, MAX_WAIT, MOVE_TICKS, SCENT_LIFE, SCENT_MAX, SEASON_TICKS, SENSE_RANGE, SMELL_RANGE,
   HEALTH_PER_HONEY, NEST_BUILD_TICKS, NEST_COST, STEAL_TICKS, BEE_STING_DAMAGE, STING_DAMAGE, STING_TICKS, WASP_COST, BUILD_MAX,
   BEE_CAPACITY, WASP_CAPACITY,
 } from './world';
@@ -68,6 +68,12 @@ export const API_DOCS: ApiDoc[] = [
     doc: `Position of the tile within ${SMELL_RANGE} tiles where that scent is strongest, or None if you can't smell it. Scent carries ${SMELL_RANGE / SENSE_RANGE} times as far as a bee can see.` },
   { name: 'smell_here', signature: 'smell_here(name)', insert: 'smell_here("${1:food}")', only: 'worker',
     doc: `How strong that scent is on your tile: ${SCENT_MAX} when just marked, fading to 0.` },
+
+  // the hive board
+  { name: 'tell', signature: 'tell(name, value)', insert: 'tell("${1:flowers}", ${2:value})',
+    doc: `At the hive (or, for a wasp, its nest), put a number, text, True/False, a position or a list of up to ${BOARD_ITEMS} of them on the colony's board, in ${TELL_TICKS} ticks. The board holds ${BOARD_NAMES} names; telling a name again replaces it, and None takes it off. Returns True, or False if the bee isn't home or it doesn't fit.` },
+  { name: 'recall', signature: 'recall(name)', insert: 'recall("${1:flowers}")',
+    doc: 'What the board says under that name, at the hive (or, for a wasp, its nest), or None if nothing does or the bee is away. Nothing on the board updates itself, so it may be out of date.' },
 
   // the queen
   { name: 'egg_cost', signature: 'egg_cost(role, energy=..., capacity=..., damage=..., health=...)', insert: 'egg_cost(${1:"wasp"})',

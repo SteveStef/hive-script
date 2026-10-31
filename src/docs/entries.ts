@@ -2,7 +2,7 @@ import {
   BEE_CAPACITY, BEE_HEALTH, BEE_STING_DAMAGE, HEALTH_PER_HONEY, NEST_BUILD_TICKS, NEST_COST, NEST_HEALTH, STEAL_TICKS, STING_DAMAGE, STING_TICKS, WASP_COST, WASP_HEALTH,
   BEE_COST, BUILD_COST, BUILD_TICKS, COLLECT_TICKS, DEPOSIT_TICKS, EAT_TICKS, ENERGY_PER_HONEY, HATCH_TICKS, LAY_TICKS,
   BLOOMS, MARK_TICKS, MOVE_TICKS, SCENT_LIFE, SCENT_MAX, SEASON_TICKS, SENSE_RANGE, SHARED_LINE_BASE, SMELL_RANGE, VISITOR_KILLS, WILD_SIGHT, WINTER_IDLE,
-  BUILD_MAX, eggCost, MAX_ENERGY,
+  BOARD_ITEMS, BOARD_NAMES, BOARD_TEXT, BUILD_MAX, eggCost, MAX_ENERGY, TELL_TICKS,
   type Programs, type WorldOptions,
 } from '../sim/world';
 import { parse } from '../lang/parser';
@@ -245,6 +245,16 @@ export const DOCS: Record<string, DocEntry> = {
     time: instant,
     covers: ['life_left'],
     demo: { forager: 'while True:\n    print("age", age(), "| old age in", life_left())\n    wait(60)', view: HIVE_VIEW, length: 400 },
+  },
+
+  // ---- the hive board ----
+  tell: {
+    section: 'The colony',
+    details: `The hive board is what the colony knows, like a waggle dance: a bee reports what it found, and bees at home read it. tell(name, value) puts a value on the board, and recall(name) reads it. Both work only at the hive, or for a wasp at its nest; the queen is always home. A value can be a number, text up to ${BOARD_TEXT} letters, True/False, a position, or a list of up to ${BOARD_ITEMS} of those. The board holds ${BOARD_NAMES} names: telling a name again replaces its value, and tell(name, None) frees the name. Only your colony can read your board. It stays through a deploy, and it never updates itself, so a flower on it may have run dry, or a hive may be gone. The Board tab beside the log shows what's on it.`,
+    returns: 'tell(): True, or False if the bee is away from home, the value is too big, or the board is full. recall(): the value, or None if nothing has that name or the bee is away.',
+    time: `tell(): ${TELL_TICKS} ticks. recall(): instant.`,
+    covers: ['recall'],
+    demo: { forager: 'tell("flowers", [[5, 3], [6, 3]])\nspots = recall("flowers")\nprint("at home:", spots)\nmove_to(spots[0])\nprint("out here:", recall("flowers"))', view: MEADOW_VIEW },
   },
 
   // ---- scent ----

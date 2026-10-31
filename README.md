@@ -191,6 +191,10 @@ Key ideas:
   `move_to()` steers around bees and gives up if blocked too long; `nearest_flower()` skips
   flowers another bee is on. `flowers_near()` lists every flower with nectar in sight (4 tiles),
   nearest first, taken or not, and `nectar_at(position)` reads one, so a script can choose.
+- **The hive board is the colony's memory.** `tell(name, value)` (10 ticks) and `recall(name)`
+  work only at home (a wasp's nest counts), so news travels when a bee flies back. It holds 8
+  names, each a number, a short text, True/False, a position, or a list of up to 20 of those.
+  It's private, it stays through a deploy and it never updates itself.
 - **The economy limits the colony, not a fixed number.** Each egg costs 10 honey and every
   bee or egg needs a cell of comb; workers `build()` more comb from 15 honey. Flowers can
   only feed so many bees, and winter eats into stores, so a queen who lays too eagerly

@@ -9,6 +9,7 @@ import { DEFAULT_WASP, roleTemplate } from './defaultScript';
 import { insideHive, Renderer, roleColor } from './render/renderer';
 import { TILE } from './render/scenery';
 import { parseScripts, type ScriptProblem, type ScriptSet } from './sim/scripts';
+import { format } from './lang/interpreter';
 import { RemoteColony, type BeeView, type ColonyJson, type ColonyView } from './sim/view';
 import { COLS, HIVE_SPOT, hiveProblem, locate, MAX_ENERGY, MAX_ROLES, NEST_SPOT, NEW_COLONY, RESERVED_NAMES, ROLE_NAME, ROWS, SEASON_TICKS, tileKey, World, type LogLine, type ScriptFile, type Tile, type WorldOptions } from './sim/world';
 import { beeCard, beeStatus, queenCard, queenStatus } from './ui/beeCard';
@@ -57,6 +58,7 @@ const chatList = $('chat-list');
 const chatInput = $<HTMLInputElement>('chat-input');
 const chatUnread = $('chat-unread');
 const leadersEl = $('leaders');
+const boardEl = $('hive-board');
 const hud = {
   honey: $('s-honey'), bees: $('s-bees'), eggs: $('s-eggs'), comb: $('s-comb'), deaths: $('s-deaths'), tick: $('s-tick'),
   season: $('season-name'), seasonBar: $('season-bar'), seasonLeft: $('season-left'), status: $('status'),
@@ -105,7 +107,8 @@ let shownFor = 133; // how long it stays on screen
 // the player's world as the world map last showed it, and the map being watched
 let overview: WorldOverview | null = null;
 let worldTimer = 0;
-let pane: 'log' | 'chat' | 'leaders' = 'log';
+let pane: 'log' | 'board' | 'chat' | 'leaders' = 'log';
+let boardShown: string | null = null; // the board as last drawn, so an unchanged one isn't redrawn every frame
 let unread = 0;
 let leadersTimer = 0;
 // the tutorial: the open lesson, which of its goals are met, and the player's code while "Show me" shows the solution
@@ -176,7 +179,7 @@ function setMode(next: PlayMode): void {
   $('multi-controls').hidden = mode !== 'multi';
   mapBar.hidden = mode === 'tutorial'; // single player has a map next door too; a lesson shows the arrows only if its world has more than one map
   $('world-map').hidden = mode !== 'multi';
-  for (const tab of document.querySelectorAll<HTMLElement>('.console-tab[data-pane]:not([data-pane="log"])')) tab.hidden = mode !== 'multi';
+  for (const tab of document.querySelectorAll<HTMLElement>('.console-tab[data-pane]:not([data-pane="log"]):not([data-pane="board"])')) tab.hidden = mode !== 'multi';
   lessonSwitch.hidden = mode !== 'tutorial';
   showLessonView(mode === 'tutorial' ? 'lesson' : 'colony');
   showPane('log');
@@ -832,6 +835,27 @@ function showPane(next: typeof pane): void {
   }
 }
 
+/** The Board tab: what's on the colony's hive board, name by name. */
+function showBoard(w: ColonyView): void {
+  const rows = [...w.board].map(([name, value]) => [name, format(value, true)]);
+  const key = JSON.stringify(rows);
+  if (key === boardShown) return;
+  boardShown = key;
+  if (!rows.length) {
+    boardEl.textContent = 'Nothing on the hive board yet. Bees put news here with tell(name, value).';
+    return;
+  }
+  boardEl.replaceChildren(...rows.map(([name, value]) => {
+    const row = document.createElement('div');
+    row.className = 'log-row board-row';
+    const label = document.createElement('span');
+    label.className = 'board-name';
+    label.textContent = name;
+    row.append(label, document.createTextNode(value));
+    return row;
+  }));
+}
+
 function chatRow(m: ChatMessage): HTMLElement {
   const row = document.createElement('div');
   row.className = m.username === username ? 'log-row chat-row mine' : 'log-row chat-row';
@@ -1259,6 +1283,7 @@ function frame(now: number): void {
   renderer.draw(w, frac, typeof selected === 'number' ? selected : null, hover, ghost);
   w.events = [];
   updateHud(w);
+  if (pane === 'board') showBoard(w);
   requestAnimationFrame(frame);
 }
 

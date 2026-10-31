@@ -38,14 +38,16 @@
         <button class="pbtn fs-btn" type="button" data-focus="code" aria-pressed="false" title="Fullscreen editor (Esc to leave)" aria-label="Fullscreen editor"><svg class="fs-enter" viewBox="0 0 16 16" width="16" height="16" aria-hidden="true"><path d="M1 6V1h5M10 1h5v5M15 10v5h-5M6 15H1v-5" fill="none" stroke="currentColor" stroke-width="2"/></svg><svg class="fs-leave" viewBox="0 0 16 16" width="16" height="16" aria-hidden="true"><path d="M6 1v5H1M15 6h-5V1M10 15v-5h5M1 10h5v5" fill="none" stroke="currentColor" stroke-width="2"/></svg></button>
         <div class="tabs" role="tablist" id="tabs"></div>
         <div id="editor"></div>
-        <div class="console-head" role="tablist" aria-label="Log, chat and leaderboard">
+        <div class="console-head" role="tablist" aria-label="Log, hive board, chat and leaderboard">
           <button class="console-tab" type="button" role="tab" data-pane="log" aria-selected="true">Log<span class="unread" id="log-unread" hidden></span></button>
+          <button class="console-tab" type="button" role="tab" data-pane="board" aria-selected="false">Board</button>
           <button class="console-tab" type="button" role="tab" data-pane="chat" aria-selected="false" hidden>Chat<span class="unread" id="chat-unread" hidden></span></button>
           <button class="console-tab" type="button" role="tab" data-pane="leaders" aria-selected="false" hidden>Leaders</button>
           <button class="console-toggle" id="console-toggle" type="button" aria-expanded="true" aria-controls="console-panes" title="Hide the log"><svg viewBox="0 0 12 12" width="12" height="12" aria-hidden="true"><path d="M2 4l4 4 4-4" fill="none" stroke="currentColor" stroke-width="2"/></svg></button>
         </div>
         <div class="console-panes" id="console-panes">
           <div id="console" class="console" data-pane="log" aria-live="polite"></div>
+          <div class="console hive-board" id="hive-board" data-pane="board" hidden></div>
           <div class="chat-pane" data-pane="chat" hidden>
             <div class="console chat-list" id="chat-list" aria-live="polite"></div>
             <form class="chat-form" id="chat-form" autocomplete="off">

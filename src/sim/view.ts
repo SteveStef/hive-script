@@ -75,6 +75,8 @@ export interface ColonyView {
   readonly log: LogLine[];
   readonly roleNames: string[];
   readonly scents: Map<number, Map<string, number>>;
+  /** The hive board: what this colony's bees have told each other. */
+  readonly board: Map<string, Value>;
   readonly over: string | null;
   /** What happened since the renderer last looked; it clears them. */
   events: WorldEvent[];
@@ -105,6 +107,7 @@ export interface OwnColonyJson {
   log: LogLine[]; // the latest lines; a viewer keeps the ones whose seq it hasn't seen
   roleNames: string[];
   scents: [number, [string, number][]][];
+  board: [string, Value][];
   raiders: RaiderView[];
   over: string | null;
 }
@@ -181,6 +184,7 @@ export function toJson(world: World, colony: Colony | null, map: Tile, logTail =
       log: colony.log.slice(-logTail),
       roleNames: colony.roleNames,
       scents: [...colony.scents].map(([key, marks]) => [key, [...marks]]),
+      board: [...colony.board],
       raiders: colony.raiders,
       over: colony.over,
     },
@@ -217,6 +221,7 @@ export class RemoteColony implements ColonyView {
   log: LogLine[] = [];
   roleNames: string[] = ['forager'];
   scents = new Map<number, Map<string, number>>();
+  board = new Map<string, Value>();
   over: string | null = null;
   events: WorldEvent[] = [];
   private flowerIndex = new Map<number, Flower>();
@@ -231,6 +236,7 @@ export class RemoteColony implements ColonyView {
     if (!c) {
       Object.assign(this, { honey: 0, comb: 0, deaths: 0, hive: null, nest: null, shielded: false, shieldEnds: null, bees: [], fallen: [], eggs: [], queen: null, roleNames: ['forager'], raiders: [], over: null });
       this.scents = new Map();
+      this.board = new Map();
       return;
     }
     Object.assign(this, { honey: c.honey, comb: c.comb, deaths: c.deaths, hive: c.hive, nest: c.nest ?? null, shielded: !!c.shielded, shieldEnds: c.shieldEnds ?? null, eggs: c.eggs, roleNames: c.roleNames, raiders: c.raiders ?? [], over: c.over });
@@ -238,6 +244,7 @@ export class RemoteColony implements ColonyView {
     this.fallen = c.fallen.map(beeView);
     this.queen = c.queen && { runner: runnerView(c.queen.runner), action: c.queen.action, laid: c.queen.laid };
     this.scents = new Map(c.scents.map(([key, marks]) => [key, new Map(marks)]));
+    this.board = new Map(c.board ?? []);
     const last = this.log.at(-1)?.seq ?? -1;
     this.log.push(...c.log.filter(l => l.seq > last));
     if (this.log.length > this.logLimit) this.log.splice(0, this.log.length - this.logLimit);

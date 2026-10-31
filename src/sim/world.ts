@@ -38,6 +38,11 @@ export const MARK_TICKS = 1; // leaving scent is quick, so sharing a find costs 
 export const SCENT_LIFE = 2400; // ticks a mark lasts, most of a season (2:40 at 1x); it fades evenly to nothing
 export const SCENT_MAX = 100; // a fresh mark's strength
 export const SCENT_NAME_MAX = 20; // characters in a scent's name, like "food" or "danger"
+// the hive board: what bees tell each other at home, like a waggle dance
+export const TELL_TICKS = 10;
+export const BOARD_NAMES = 8; // entries a colony's board holds
+export const BOARD_ITEMS = 20; // items in a list on the board
+export const BOARD_TEXT = 40; // characters in a text on the board, so a long one can't stand in for a list
 
 // flowers: each season but winter grows its own kind, in patches placed from the seed
 export type FlowerKind = 'clover' | 'lavender' | 'goldenrod';
@@ -205,6 +210,7 @@ export type Action =
   | { kind: 'move'; path: Tile[]; target: Tile; stepLeft: number; moving: boolean; waited: number; single: boolean; hop?: number } // hop: ticks per tile, if not MOVE_TICKS
   | { kind: 'collect' | 'deposit' | 'eat' | 'build' | 'wait' | 'bump' | 'steal'; left: number }
   | { kind: 'mark' | 'unmark'; left: number; scent: string }
+  | { kind: 'tell'; left: number; name: string; value: Value }
   | { kind: 'sting'; left: number; target: Tile };
 type MoveAction = Extract<Action, { kind: 'move' }>;
 
@@ -261,7 +267,7 @@ export interface Nest extends Tile {
 /** The queen never leaves the hive and never dies; her script decides when to lay. */
 export interface Queen {
   runner: Runner;
-  action: { kind: 'lay' | 'wait'; left: number } | { kind: 'nest'; left: number; target: Tile } | null;
+  action: { kind: 'lay' | 'wait'; left: number } | { kind: 'nest'; left: number; target: Tile } | { kind: 'tell'; left: number; name: string; value: Value } | null;
   laid: number;
 }
 
@@ -358,6 +364,7 @@ export interface ColonySave {
   deaths: number;
   comb: number;
   scents: [number, [string, number][]][];
+  board?: [string, Value][];
   bees: Body[];
   fallen: Body[];
   eggs: Egg[];
@@ -413,6 +420,8 @@ export class Colony {
   logCount = 0;
   /** Scent marks this colony's bees left: tileKey -> scent name -> the tick it was last marked. Only they can smell them. */
   readonly scents = new Map<number, Map<string, number>>();
+  /** The hive board: what its bees have told each other, by name. Only they can read it, and only at home. */
+  readonly board = new Map<string, Value>();
   /** Set when the colony has died out. */
   over: string | null = null;
   emptyFor = 0;
@@ -592,6 +601,17 @@ export class Colony {
    * Swaps in new scripts while the world runs. At the next tick every bee and the queen start
    * the new code from the top; their bodies (position, energy, cargo, age) stay as they are.
    */
+  /** Puts a value on the hive board (None takes it off). False if it doesn't fit: too big, or the board is full. */
+  tell(name: string, value: Value): boolean {
+    if (value === null) {
+      this.board.delete(name);
+      return true;
+    }
+    if (!boardFits(value) || (!this.board.has(name) && this.board.size >= BOARD_NAMES)) return false;
+    this.board.set(name, value);
+    return true;
+  }
+
   deploy(programs: Programs): void {
     this.programs = programs;
     this.world.error = null;
@@ -623,6 +643,7 @@ export class Colony {
       shielded: this.shielded, shieldEnds: this.shieldEnds,
       honey: this.honey, totalHoney: this.totalHoney, deaths: this.deaths, comb: this.comb,
       scents: [...this.scents].map(([key, marks]) => [key, [...marks]]),
+      board: [...this.board],
       bees: this.bees.map(body),
       fallen: this.fallen.map(body),
       eggs: this.eggs,
@@ -1129,6 +1150,7 @@ export class World {
         shielded: cs.shielded ?? false, shieldEnds: cs.shieldEnds ?? null,
       });
       for (const [key, marks] of cs.scents) c.scents.set(key, new Map(marks));
+      for (const [name, value] of cs.board ?? []) c.board.set(name, value);
       c.eggs.push(...cs.eggs);
       c.log.push(...cs.log);
       c.queen = cs.queen && { runner: queenRunner(c, p), action: null, laid: cs.queen.laid };
@@ -1171,12 +1193,15 @@ export class World {
     const q = colony.queen!;
     if (q.action && --q.action.left > 0) return;
     if (q.action?.kind === 'nest') q.runner.resume(this.buildNest(colony, q.action.target));
+    if (q.action?.kind === 'tell') q.runner.resume(colony.tell(q.action.name, q.action.value));
     q.action = null;
     if (q.runner.finished) return;
     const result = q.runner.run(OPS_PER_TICK);
     if (result.type === 'action') {
       if (result.action === 'nest') {
         q.action = { kind: 'nest', left: NEST_BUILD_TICKS, target: { x: result.args[0] as number, y: result.args[1] as number } };
+      } else if (result.action === 'tell') {
+        q.action = { kind: 'tell', left: TELL_TICKS, name: result.args[0] as string, value: result.args[1] };
       } else if (result.action === 'lay') {
         const role = (result.args[0] as string | undefined) ?? 'forager';
         // the stats the queen raised, as [stat, value] pairs (the API has checked them)
@@ -1279,6 +1304,7 @@ export class World {
       case 'build': return (ENERGY_PER_WORK * 4) / BUILD_TICKS;
       case 'mark':
       case 'unmark': return ENERGY_PER_WORK / MARK_TICKS;
+      case 'tell': return ENERGY_PER_WORK / TELL_TICKS;
       case 'sting': return ENERGY_PER_WORK / STING_TICKS;
       case 'steal': return ENERGY_PER_WORK / STEAL_TICKS;
       default: return winter ? WINTER_IDLE : ENERGY_IDLE;
@@ -1354,6 +1380,9 @@ export class World {
       case 'mark':
       case 'unmark':
         bee.action = { kind: action, left: MARK_TICKS, scent: args[0] as string };
+        return;
+      case 'tell':
+        bee.action = { kind: 'tell', left: TELL_TICKS, name: args[0] as string, value: args[1] };
         return;
       case 'die':
         this.die(colony, bee, 'by choice');
@@ -1477,6 +1506,9 @@ export class World {
         break;
       case 'unmark':
         bee.runner.resume(unmarkScent(colony, bee, a.scent));
+        break;
+      case 'tell':
+        bee.runner.resume(colony.atHome(bee) && colony.tell(a.name, a.value));
         break;
       case 'sting': {
         const hit = this.strike(bee, colony, a.target);
@@ -1835,6 +1867,16 @@ export class World {
     w.action = { kind: 'wait', left: BUMP_TICKS };
     return false;
   }
+}
+
+/**
+ * Whether a value fits on the hive board: a number, True/False, a short text, or a list of up to
+ * BOARD_ITEMS of those or of positions. Nothing deeper, so one entry can't hold a whole map.
+ */
+export function boardFits(value: Value): boolean {
+  const single = (v: Value) => (typeof v === 'string' ? v.length <= BOARD_TEXT : !Array.isArray(v));
+  if (!Array.isArray(value)) return single(value);
+  return value.length <= BOARD_ITEMS && value.every(v => (Array.isArray(v) ? v.length === 2 && v.every(n => typeof n === 'number') : single(v)));
 }
 
 /** Forgets marks that have faded completely. */

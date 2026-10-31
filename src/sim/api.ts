@@ -1,6 +1,6 @@
 import { builtin, coreBuiltins, expectArgs } from '../lang/builtins';
 import { ScriptError } from '../lang/errors';
-import { format, type ActionRequest, type Named, type Value } from '../lang/interpreter';
+import { format, isCallable, type ActionRequest, type Named, type Value } from '../lang/interpreter';
 import { BUILD_MAX, COLS, DIRS, eggCost, MAX_WAIT, NEST_COST, ROWS, SCENT_NAME_MAX, statDefault, STATS, type Bee, type Build, type Colony } from './world';
 
 const act = (action: string, args: Value[] = []): ActionRequest => ({ action, args });
@@ -47,6 +47,21 @@ function position(colony: Colony, name: string, v: Value, line: number): [number
   }
   throw new ScriptError(`${name}() needs a position like [3, 5], not ${format(v, true)}.`, line);
 }
+
+/** A hive board entry's name: text, up to the same length as a scent's name. */
+function boardName(name: string, v: Value, line: number): string {
+  if (typeof v === 'string' && v.length >= 1 && v.length <= SCENT_NAME_MAX) return v;
+  throw new ScriptError(`${name}() needs the entry's name as text, like "flowers" (up to ${SCENT_NAME_MAX} letters), not ${format(v, true)}.`, line);
+}
+
+/** tell(name, value), for the queen and workers alike. Whether it fits is checked when it lands, as a False. */
+const tell = builtin('tell', (args, line) => {
+  expectArgs('tell', args, 2, line);
+  const name = boardName('tell', args[0], line);
+  const plain = (v: Value): boolean => !isCallable(v) && (!Array.isArray(v) || v.every(plain));
+  if (!plain(args[1])) throw new ScriptError("tell() can share numbers, text, True/False, None and lists of them, but not a function.", line);
+  return act('tell', [name, args[1]]);
+});
 
 /** Senses about the whole colony, plus wait(); both the queen and the workers get these. */
 function colonyGlobals(colony: Colony): Record<string, Value> {
@@ -258,6 +273,12 @@ export function beeGlobals(colony: Colony, bee: Bee): Record<string, Value> {
       const t = colony.strongestScent(bee, scentName('smell', args[0], line));
       return t ? [t.x, t.y] : null;
     }),
+    tell,
+    recall: builtin('recall', (args, line) => {
+      expectArgs('recall', args, 1, line);
+      const name = boardName('recall', args[0], line);
+      return colony.atHome(bee) ? colony.board.get(name) ?? null : null; // news is only heard at home
+    }),
     smell_here: builtin('smell_here', (args, line) => {
       expectArgs('smell_here', args, 1, line);
       return colony.scentAt(bee.x, bee.y, scentName('smell_here', args[0], line));
@@ -286,6 +307,11 @@ export function queenGlobals(colony: Colony): Record<string, Value> {
     gates: builtin('gates', (args, line) => {
       expectArgs('gates', args, 0, line);
       return colony.world.gatesOf(colony.map, colony.hive).map(t => [t.x, t.y]);
+    }),
+    tell,
+    recall: builtin('recall', (args, line) => {
+      expectArgs('recall', args, 1, line);
+      return colony.board.get(boardName('recall', args[0], line)) ?? null;
     }),
     lay: builtin('lay', (args, line, named) => {
       const { role, build } = eggOrder(colony, 'lay', args, named, line);

@@ -24,6 +24,7 @@ export function beeStatus(bee: BeeView): { label: string; tone: StatusTone } {
     case 'eat': return { label: 'Eating', tone };
     case 'mark': return { label: 'Marking', tone };
     case 'unmark': return { label: 'Unmarking', tone };
+    case 'tell': return { label: 'Telling the hive', tone };
     case 'sting': return { label: 'Stinging', tone };
     case 'steal': return { label: 'Raiding', tone };
     case 'bump': return { label: 'Bumped the edge', tone };
@@ -94,6 +95,7 @@ export function queenStatus(queen: QueenView): { label: string; tone: StatusTone
   if (queen.runner.error) return { label: 'Stopped by an error', tone: 'warn' };
   if (queen.runner.finished) return { label: 'Finished her script', tone: 'warn' };
   if (queen.action?.kind === 'lay') return { label: 'Laying', tone: 'ok' };
+  if (queen.action?.kind === 'tell') return { label: 'Telling the hive', tone: 'ok' };
   if (queen.action?.kind === 'wait') return { label: 'Waiting', tone: 'ok' };
   return { label: 'Thinking', tone: 'ok' };
 }
